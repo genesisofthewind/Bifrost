@@ -1,0 +1,11 @@
+{
+  "name": "thordrawbridge",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "gradle assembleDebug"
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}

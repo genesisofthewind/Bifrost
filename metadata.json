@@ -1,0 +1,6 @@
+{
+  "name": "ThorDrawBridge",
+  "description": "Automated drawing automation for AYN Thor dual-screen handheld, targeting Tomodachi Life in Eden Nightly emulator.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
