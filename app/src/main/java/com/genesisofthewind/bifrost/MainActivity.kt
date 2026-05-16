@@ -38,6 +38,7 @@ class MainActivity : ComponentActivity() {
                     MainScreen(
                         onOpenAccessibility = { openAccessibilitySettings() },
                         onStartOverlay = { startOverlay() },
+                        onStopOverlay = { stopOverlay() },
                         onCalibrate = { calibrate() },
                         onDrawLine = { DrawAccessibilityService.getInstance()?.executeCommand(ShapeCommand.TestLine) },
                         onDrawSquare = { DrawAccessibilityService.getInstance()?.executeCommand(ShapeCommand.TestSquare) },
@@ -54,16 +55,24 @@ class MainActivity : ComponentActivity() {
 
     private fun startOverlay() {
         if (!Settings.canDrawOverlays(this)) {
+            BifrostDebug.record("Overlay permission requested")
             val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))
             startActivity(intent)
         } else {
+            BifrostDebug.record("Overlay start requested")
             startService(Intent(this, FloatingOverlayService::class.java))
         }
+    }
+
+    private fun stopOverlay() {
+        BifrostDebug.record("Overlay stop requested from app")
+        stopService(Intent(this, FloatingOverlayService::class.java))
     }
 
     private fun calibrate() {
         calibrationStore.saveTopLeft(100f, 100f)
         calibrationStore.saveBottomRight(900f, 900f)
+        BifrostDebug.record("Calibration defaults saved")
     }
 }
 
@@ -71,6 +80,7 @@ class MainActivity : ComponentActivity() {
 fun MainScreen(
     onOpenAccessibility: () -> Unit,
     onStartOverlay: () -> Unit,
+    onStopOverlay: () -> Unit,
     onCalibrate: () -> Unit,
     onDrawLine: () -> Unit,
     onDrawSquare: () -> Unit,
@@ -100,6 +110,7 @@ fun MainScreen(
                         modifier = Modifier.weight(1f),
                         onOpenAccessibility = onOpenAccessibility,
                         onStartOverlay = onStartOverlay,
+                        onStopOverlay = onStopOverlay,
                         onCalibrate = onCalibrate,
                         onDrawLine = onDrawLine,
                         onDrawSquare = onDrawSquare,
@@ -112,6 +123,7 @@ fun MainScreen(
                         verticalArrangement = Arrangement.spacedBy(24.dp)
                     ) {
                         CalibrationCard()
+                        DebugStatusCard()
                         FloatingBubbleMock()
                     }
                 }
@@ -218,6 +230,7 @@ fun ControlCard(
     modifier: Modifier = Modifier,
     onOpenAccessibility: () -> Unit,
     onStartOverlay: () -> Unit,
+    onStopOverlay: () -> Unit,
     onCalibrate: () -> Unit,
     onDrawLine: () -> Unit,
     onDrawSquare: () -> Unit,
@@ -237,6 +250,7 @@ fun ControlCard(
         
         SophisticatedButton(onClick = onOpenAccessibility, text = "Open Accessibility Settings", icon = "⚙️")
         SophisticatedButton(onClick = onStartOverlay, text = "Start Floating Overlay", icon = "☁️")
+        SophisticatedButton(onClick = onStopOverlay, text = "Stop Floating Overlay", icon = "✕")
         
         Button(
             onClick = onCalibrate,
@@ -320,6 +334,32 @@ fun CalibrationCard() {
                     Text("$k: ", color = Color(0xFFF59E0B), fontSize = 11.sp, fontFamily = FontFamily.Monospace)
                     Text(v, color = TextMuted, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
                 }
+            }
+        }
+    }
+}
+
+@Composable
+fun DebugStatusCard() {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(SurfaceDark, RoundedCornerShape(8.dp))
+            .border(1.dp, BorderDark, RoundedCornerShape(8.dp))
+            .padding(20.dp)
+    ) {
+        Text("DEBUG STATUS", style = MaterialTheme.typography.labelMedium, color = White, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+        Spacer(modifier = Modifier.height(12.dp))
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(BackgroundDark, RoundedCornerShape(4.dp))
+                .border(1.dp, BorderDark, RoundedCornerShape(4.dp))
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            BifrostDebug.messages.forEach { message ->
+                Text(message, color = TextMuted, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
             }
         }
     }

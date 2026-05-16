@@ -2,8 +2,8 @@ package com.genesisofthewind.bifrost.services
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
-import android.util.Log
 import android.view.accessibility.AccessibilityEvent
+import com.genesisofthewind.bifrost.BifrostDebug
 import com.genesisofthewind.bifrost.data.CalibrationStore
 import com.genesisofthewind.bifrost.engine.DrawEngine
 import com.genesisofthewind.bifrost.engine.ShapeCommand
@@ -28,7 +28,7 @@ class DrawAccessibilityService : AccessibilityService() {
 
     override fun onServiceConnected() {
         super.onServiceConnected()
-        Log.d("DrawService", "Accessibility Service Connected")
+        BifrostDebug.record("Accessibility service connected")
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
@@ -38,12 +38,15 @@ class DrawAccessibilityService : AccessibilityService() {
     fun executeCommand(command: ShapeCommand) {
         val gesture = drawEngine.createGestureForCommand(command)
         if (gesture != null) {
+            BifrostDebug.record("Dispatching test gesture: ${command::class.simpleName}")
             dispatchGesture(gesture, object : GestureResultCallback() {
                 override fun onCompleted(gestureDescription: GestureDescription) {
                     super.onCompleted(gestureDescription)
-                    Log.d("DrawService", "Gesture completed")
+                    BifrostDebug.record("Gesture completed")
                 }
             }, null)
+        } else {
+            BifrostDebug.record("Gesture action stopped")
         }
     }
 
