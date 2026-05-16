@@ -7,6 +7,7 @@ import android.view.accessibility.AccessibilityEvent
 import com.genesisofthewind.bifrost.BifrostDebug
 import com.genesisofthewind.bifrost.data.CalibrationStore
 import com.genesisofthewind.bifrost.engine.DrawEngine
+import com.genesisofthewind.bifrost.engine.GestureStep
 import com.genesisofthewind.bifrost.engine.ShapeCommand
 
 class DrawAccessibilityService : AccessibilityService() {
@@ -47,25 +48,38 @@ class DrawAccessibilityService : AccessibilityService() {
     }
 
     fun executeCommand(command: ShapeCommand) {
-        val gesture = drawEngine.createGestureForCommand(command)
-        if (gesture != null) {
-            BifrostDebug.record("Dispatching gesture: ${command::class.simpleName}")
-            val dispatched = dispatchGesture(gesture, object : GestureResultCallback() {
-                override fun onCompleted(gestureDescription: GestureDescription) {
-                    super.onCompleted(gestureDescription)
-                    BifrostDebug.record("Gesture completed: ${command::class.simpleName}")
-                }
-
-                override fun onCancelled(gestureDescription: GestureDescription) {
-                    super.onCancelled(gestureDescription)
-                    BifrostDebug.record("Gesture cancelled: ${command::class.simpleName}")
-                }
-            }, null)
-            if (!dispatched) {
-                BifrostDebug.record("Gesture dispatch failed: ${command::class.simpleName}")
-            }
-        } else {
+        val commandName = command.javaClass.simpleName
+        BifrostDebug.record("Selected command: $commandName")
+        val steps = drawEngine.createGestureStepsForCommand(command)
+        if (steps.isEmpty()) {
             BifrostDebug.record("Gesture action stopped")
+            return
+        }
+
+        dispatchStep(commandName, steps, 0)
+    }
+
+    private fun dispatchStep(commandName: String, steps: List<GestureStep>, index: Int) {
+        val step = steps[index]
+        BifrostDebug.record("Dispatching ${step.name}: ${step.coordinates}")
+        val dispatched = dispatchGesture(step.gesture, object : GestureResultCallback() {
+            override fun onCompleted(gestureDescription: GestureDescription) {
+                super.onCompleted(gestureDescription)
+                BifrostDebug.record("Gesture completed: ${step.name}")
+                val nextIndex = index + 1
+                if (nextIndex < steps.size) {
+                    BifrostDebug.record("Queueing next $commandName stroke: ${nextIndex + 1}/${steps.size}")
+                    dispatchStep(commandName, steps, nextIndex)
+                }
+            }
+
+            override fun onCancelled(gestureDescription: GestureDescription) {
+                super.onCancelled(gestureDescription)
+                BifrostDebug.record("Gesture cancelled: ${step.name}")
+            }
+        }, null)
+        if (!dispatched) {
+            BifrostDebug.record("Gesture dispatch failed: ${step.name}")
         }
     }
 

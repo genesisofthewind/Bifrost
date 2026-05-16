@@ -12,7 +12,7 @@ import android.view.accessibility.AccessibilityManager
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableStateListOf
 
-private const val MAX_MESSAGES = 8
+private const val MAX_MESSAGES = 20
 
 object BifrostDebug {
     const val TAG = "BifrostDebug"
