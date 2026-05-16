@@ -8,8 +8,10 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -31,6 +33,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         calibrationStore = CalibrationStore(this)
+        refreshStatus()
 
         setContent {
             BifrostTheme {
@@ -39,17 +42,25 @@ class MainActivity : ComponentActivity() {
                         onOpenAccessibility = { openAccessibilitySettings() },
                         onStartOverlay = { startOverlay() },
                         onStopOverlay = { stopOverlay() },
+                        onRefreshStatus = { refreshStatus() },
                         onCalibrate = { calibrate() },
-                        onDrawLine = { DrawAccessibilityService.getInstance()?.executeCommand(ShapeCommand.TestLine) },
-                        onDrawSquare = { DrawAccessibilityService.getInstance()?.executeCommand(ShapeCommand.TestSquare) },
-                        onStop = { DrawAccessibilityService.getInstance()?.executeCommand(ShapeCommand.Stop) }
+                        onRunSafeTestGesture = { runSafeTestGesture() },
+                        onDrawLine = { runGesture(ShapeCommand.TestLine) },
+                        onDrawSquare = { runGesture(ShapeCommand.TestSquare) },
+                        onStop = { runGesture(ShapeCommand.Stop) }
                     )
                 }
             }
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        refreshStatus()
+    }
+
     private fun openAccessibilitySettings() {
+        BifrostDebug.record("Opening accessibility settings")
         startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
     }
 
@@ -74,6 +85,21 @@ class MainActivity : ComponentActivity() {
         calibrationStore.saveBottomRight(900f, 900f)
         BifrostDebug.record("Calibration defaults saved")
     }
+
+    private fun refreshStatus() {
+        BifrostDebug.refreshAccessibilityStatus(this)
+        BifrostDebug.refreshDisplayInfo(this)
+    }
+
+    private fun runSafeTestGesture() {
+        BifrostDebug.record("Safe test gesture requested from app")
+        runGesture(ShapeCommand.SafeTestGesture)
+    }
+
+    private fun runGesture(command: ShapeCommand) {
+        DrawAccessibilityService.getInstance()?.executeCommand(command)
+            ?: BifrostDebug.record("Gesture unavailable: accessibility service is not connected")
+    }
 }
 
 @Composable
@@ -81,7 +107,9 @@ fun MainScreen(
     onOpenAccessibility: () -> Unit,
     onStartOverlay: () -> Unit,
     onStopOverlay: () -> Unit,
+    onRefreshStatus: () -> Unit,
     onCalibrate: () -> Unit,
+    onRunSafeTestGesture: () -> Unit,
     onDrawLine: () -> Unit,
     onDrawSquare: () -> Unit,
     onStop: () -> Unit
@@ -98,6 +126,7 @@ fun MainScreen(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
                     .padding(24.dp),
                 verticalArrangement = Arrangement.spacedBy(24.dp)
             ) {
@@ -111,7 +140,9 @@ fun MainScreen(
                         onOpenAccessibility = onOpenAccessibility,
                         onStartOverlay = onStartOverlay,
                         onStopOverlay = onStopOverlay,
+                        onRefreshStatus = onRefreshStatus,
                         onCalibrate = onCalibrate,
+                        onRunSafeTestGesture = onRunSafeTestGesture,
                         onDrawLine = onDrawLine,
                         onDrawSquare = onDrawSquare,
                         onStop = onStop
@@ -122,6 +153,8 @@ fun MainScreen(
                         modifier = Modifier.weight(1f),
                         verticalArrangement = Arrangement.spacedBy(24.dp)
                     ) {
+                        AccessibilityStatusCard()
+                        DisplayInfoCard()
                         CalibrationCard()
                         DebugStatusCard()
                         FloatingBubbleMock()
@@ -163,7 +196,11 @@ fun Header() {
         }
 
         Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            StatusChip("ACCESSIBILITY: DISCONNECTED", RedAccent)
+            val accessibilityReady = BifrostDebug.accessibilityRuntimeReady.value
+            StatusChip(
+                "ACCESSIBILITY: ${if (accessibilityReady) "READY" else "DISCONNECTED"}",
+                if (accessibilityReady) EmeraldAccent else RedAccent
+            )
             StatusChip("OVERLAY: ACTIVE", EmeraldAccent)
         }
     }
@@ -231,7 +268,9 @@ fun ControlCard(
     onOpenAccessibility: () -> Unit,
     onStartOverlay: () -> Unit,
     onStopOverlay: () -> Unit,
+    onRefreshStatus: () -> Unit,
     onCalibrate: () -> Unit,
+    onRunSafeTestGesture: () -> Unit,
     onDrawLine: () -> Unit,
     onDrawSquare: () -> Unit,
     onStop: () -> Unit
@@ -249,8 +288,10 @@ fun ControlCard(
         }
         
         SophisticatedButton(onClick = onOpenAccessibility, text = "Open Accessibility Settings", icon = "⚙️")
+        SophisticatedButton(onClick = onRefreshStatus, text = "Refresh Status", icon = "↻")
         SophisticatedButton(onClick = onStartOverlay, text = "Start Floating Overlay", icon = "☁️")
         SophisticatedButton(onClick = onStopOverlay, text = "Stop Floating Overlay", icon = "✕")
+        SophisticatedButton(onClick = onRunSafeTestGesture, text = "Run Safe Test Gesture", icon = "→")
         
         Button(
             onClick = onCalibrate,
@@ -334,6 +375,68 @@ fun CalibrationCard() {
                     Text("$k: ", color = Color(0xFFF59E0B), fontSize = 11.sp, fontFamily = FontFamily.Monospace)
                     Text(v, color = TextMuted, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
                 }
+            }
+        }
+    }
+}
+
+@Composable
+fun AccessibilityStatusCard() {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(SurfaceDark, RoundedCornerShape(8.dp))
+            .border(1.dp, BorderDark, RoundedCornerShape(8.dp))
+            .padding(20.dp)
+    ) {
+        Text("ACCESSIBILITY STATUS", style = MaterialTheme.typography.labelMedium, color = White, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+        Spacer(modifier = Modifier.height(12.dp))
+        StatusLine("Service enabled", BifrostDebug.accessibilityEnabled.value)
+        StatusLine("Runtime ready", BifrostDebug.accessibilityRuntimeReady.value)
+    }
+}
+
+@Composable
+fun StatusLine(label: String, value: Boolean) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 3.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(label, color = TextMuted, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+        Text(
+            value.toString(),
+            color = if (value) EmeraldAccent else RedAccent,
+            fontSize = 12.sp,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Bold
+        )
+    }
+}
+
+@Composable
+fun DisplayInfoCard() {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(SurfaceDark, RoundedCornerShape(8.dp))
+            .border(1.dp, BorderDark, RoundedCornerShape(8.dp))
+            .padding(20.dp)
+    ) {
+        Text("DISPLAY DEBUG", style = MaterialTheme.typography.labelMedium, color = White, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+        Spacer(modifier = Modifier.height(12.dp))
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(BackgroundDark, RoundedCornerShape(4.dp))
+                .border(1.dp, BorderDark, RoundedCornerShape(4.dp))
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            BifrostDebug.displayInfo.forEach { line ->
+                Text(line, color = TextMuted, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
             }
         }
     }

@@ -143,7 +143,7 @@ class FloatingOverlayService : Service() {
 
             addView(menuButton("Start Test Gesture") {
                 BifrostDebug.record("Overlay start test gesture tapped")
-                DrawAccessibilityService.getInstance()?.executeCommand(ShapeCommand.TestSquare)
+                DrawAccessibilityService.getInstance()?.executeCommand(ShapeCommand.SafeTestGesture)
                     ?: BifrostDebug.record("Accessibility service is not connected")
             })
 
