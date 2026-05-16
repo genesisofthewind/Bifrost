@@ -125,6 +125,7 @@ class FloatingOverlayService : Service() {
 
         floatingView = root
         windowManager.addView(floatingView, params)
+        BifrostDebug.setOverlayRunning(true)
         BifrostDebug.record("Overlay view added")
     }
 
@@ -156,6 +157,18 @@ class FloatingOverlayService : Service() {
             addView(menuButton("Run Calibrated Test Square") {
                 BifrostDebug.record("Overlay calibrated square tapped")
                 DrawAccessibilityService.getInstance()?.executeCommand(ShapeCommand.CalibratedSmallSquare)
+                    ?: BifrostDebug.record("Accessibility service is not connected")
+            })
+
+            addView(menuButton("Run Calibrated Test Diagonal") {
+                BifrostDebug.record("Overlay calibrated diagonal tapped")
+                DrawAccessibilityService.getInstance()?.executeCommand(ShapeCommand.CalibratedDiagonal)
+                    ?: BifrostDebug.record("Accessibility service is not connected")
+            })
+
+            addView(menuButton("Run Calibrated Test X") {
+                BifrostDebug.record("Overlay calibrated X tapped")
+                DrawAccessibilityService.getInstance()?.executeCommand(ShapeCommand.CalibratedXShape)
                     ?: BifrostDebug.record("Accessibility service is not connected")
             })
 
@@ -197,6 +210,7 @@ class FloatingOverlayService : Service() {
         }
         floatingView = null
         isExpanded = false
+        BifrostDebug.setOverlayRunning(false)
     }
 
     private fun dp(value: Int): Int {

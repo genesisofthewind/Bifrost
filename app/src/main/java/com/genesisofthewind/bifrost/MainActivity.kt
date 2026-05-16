@@ -8,12 +8,36 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.LocalTextStyle
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.ScrollableTabRow
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Tab
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -21,12 +45,25 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.genesisofthewind.bifrost.data.CalibrationValues
 import com.genesisofthewind.bifrost.data.CalibrationStore
+import com.genesisofthewind.bifrost.data.CalibrationValues
 import com.genesisofthewind.bifrost.engine.ShapeCommand
 import com.genesisofthewind.bifrost.services.DrawAccessibilityService
 import com.genesisofthewind.bifrost.services.FloatingOverlayService
-import com.genesisofthewind.bifrost.ui.theme.*
+import com.genesisofthewind.bifrost.ui.theme.BackgroundDark
+import com.genesisofthewind.bifrost.ui.theme.BifrostTheme
+import com.genesisofthewind.bifrost.ui.theme.BorderDark
+import com.genesisofthewind.bifrost.ui.theme.ButtonBorderDark
+import com.genesisofthewind.bifrost.ui.theme.ButtonDark
+import com.genesisofthewind.bifrost.ui.theme.CyanAccent
+import com.genesisofthewind.bifrost.ui.theme.EmeraldAccent
+import com.genesisofthewind.bifrost.ui.theme.RedAccent
+import com.genesisofthewind.bifrost.ui.theme.RedMuted
+import com.genesisofthewind.bifrost.ui.theme.SurfaceDark
+import com.genesisofthewind.bifrost.ui.theme.TextMuted
+import com.genesisofthewind.bifrost.ui.theme.TextPrimary
+import com.genesisofthewind.bifrost.ui.theme.TextSecondary
+import com.genesisofthewind.bifrost.ui.theme.White
 
 class MainActivity : ComponentActivity() {
     private lateinit var calibrationStore: CalibrationStore
@@ -45,12 +82,8 @@ class MainActivity : ComponentActivity() {
                         onStartOverlay = { startOverlay() },
                         onStopOverlay = { stopOverlay() },
                         onRefreshStatus = { refreshStatus() },
-                        onCalibrate = { calibrate() },
                         onRunSafeTestGesture = { runSafeTestGesture() },
-                        onRunCommand = { runGesture(it) },
-                        onDrawLine = { runGesture(ShapeCommand.TestLine) },
-                        onDrawSquare = { runGesture(ShapeCommand.TestSquare) },
-                        onStop = { runGesture(ShapeCommand.Stop) }
+                        onRunCommand = { runGesture(it) }
                     )
                 }
             }
@@ -74,23 +107,20 @@ class MainActivity : ComponentActivity() {
             startActivity(intent)
         } else {
             BifrostDebug.record("Overlay start requested")
+            BifrostDebug.setOverlayRunning(true)
             startService(Intent(this, FloatingOverlayService::class.java))
         }
     }
 
     private fun stopOverlay() {
         BifrostDebug.record("Overlay stop requested from app")
+        BifrostDebug.setOverlayRunning(false)
         stopService(Intent(this, FloatingOverlayService::class.java))
-    }
-
-    private fun calibrate() {
-        calibrationStore.saveTopLeft(100f, 100f)
-        calibrationStore.saveBottomRight(900f, 900f)
-        BifrostDebug.record("Calibration defaults saved")
     }
 
     private fun refreshStatus() {
         BifrostDebug.refreshAccessibilityStatus(this)
+        BifrostDebug.refreshOverlayPermission(this)
         BifrostDebug.refreshDisplayInfo(this)
     }
 
@@ -112,419 +142,241 @@ fun MainScreen(
     onStartOverlay: () -> Unit,
     onStopOverlay: () -> Unit,
     onRefreshStatus: () -> Unit,
-    onCalibrate: () -> Unit,
     onRunSafeTestGesture: () -> Unit,
-    onRunCommand: (ShapeCommand) -> Unit,
-    onDrawLine: () -> Unit,
-    onDrawSquare: () -> Unit,
-    onStop: () -> Unit
+    onRunCommand: (ShapeCommand) -> Unit
 ) {
-    Column(modifier = Modifier.fillMaxSize()) {
-        // Header
-        Header()
+    var selectedTab by remember { mutableStateOf(0) }
+    val tabs = listOf("Status", "Overlay", "Calibration", "Test Shapes", "Debug")
 
-        Row(modifier = Modifier.fillMaxSize()) {
-            // Sidebar
-            Sidebar()
-
-            // Main Content Area
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
-                    .padding(24.dp),
-                verticalArrangement = Arrangement.spacedBy(24.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(24.dp)
-                ) {
-                    Column(
-                        modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(24.dp)
-                    ) {
-                        ControlCard(
-                            modifier = Modifier.fillMaxWidth(),
-                            onOpenAccessibility = onOpenAccessibility,
-                            onStartOverlay = onStartOverlay,
-                            onStopOverlay = onStopOverlay,
-                            onRefreshStatus = onRefreshStatus,
-                            onCalibrate = onCalibrate,
-                            onRunSafeTestGesture = onRunSafeTestGesture,
-                            onDrawLine = onDrawLine,
-                            onDrawSquare = onDrawSquare,
-                            onStop = onStop
-                        )
-                        CoordinateCalibrationCard(
-                            calibrationStore = calibrationStore,
-                            onRunCommand = onRunCommand
-                        )
-                    }
-
-                    // Info Column
-                    Column(
-                        modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(24.dp)
-                    ) {
-                        AccessibilityStatusCard()
-                        DisplayInfoCard()
-                        DebugStatusCard()
-                        FloatingBubbleMock()
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun Header() {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(64.dp)
-            .background(HeaderDark)
-            .border(1.dp, BorderDark)
-            .padding(horizontal = 24.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Box(
-                modifier = Modifier
-                    .size(32.dp)
-                    .background(CyanAccent, RoundedCornerShape(4.dp)),
-                contentAlignment = Alignment.Center
-            ) {
-                Text("⚡", color = Color.Black, fontWeight = FontWeight.Bold)
-            }
-            Column {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Bifrost", style = MaterialTheme.typography.titleMedium, color = White, fontWeight = FontWeight.Bold)
-                    Text("V0.1.0-MVP", color = TextSecondary, fontSize = 10.sp, modifier = Modifier.padding(start = 8.dp), fontFamily = FontFamily.Monospace)
-                }
-                Text("AYN THOR DUAL-SCREEN HANDHELD UTILITY", fontSize = 9.sp, color = TextSecondary, fontWeight = FontWeight.SemiBold, letterSpacing = 1.sp)
-            }
-        }
-
-        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            val accessibilityReady = BifrostDebug.accessibilityRuntimeReady.value
-            StatusChip(
-                "ACCESSIBILITY: ${if (accessibilityReady) "READY" else "DISCONNECTED"}",
-                if (accessibilityReady) EmeraldAccent else RedAccent
-            )
-            StatusChip("OVERLAY: ACTIVE", EmeraldAccent)
-        }
-    }
-}
-
-@Composable
-fun StatusChip(label: String, color: Color) {
-    Row(
-        modifier = Modifier
-            .background(ButtonDark, RoundedCornerShape(50))
-            .border(1.dp, ButtonBorderDark, RoundedCornerShape(50))
-            .padding(horizontal = 12.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        Box(modifier = Modifier.size(8.dp).background(color, RoundedCornerShape(50)))
-        Text(label, color = TextMuted, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
-    }
-}
-
-@Composable
-fun Sidebar() {
     Column(
         modifier = Modifier
-            .width(200.dp)
-            .fillMaxHeight()
-            .background(HeaderDark)
-            .border(1.dp, BorderDark)
-            .padding(16.dp)
-    ) {
-        Text("PROJECT STRUCTURE", style = MaterialTheme.typography.labelSmall, color = TextSecondary, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-        Spacer(modifier = Modifier.height(16.dp))
-        val files = listOf(
-            "📂 app/src/main",
-            "  📂 java/com/genesisofthewind/bifrost",
-            "    📄 MainActivity.kt",
-            "    📄 DrawEngine.kt",
-            "    📄 ShapeCommands.kt",
-            "  📂 services",
-            "    📄 DrawAccessibilityService.kt"
-        )
-        files.forEach { file ->
-            Text(file, color = TextMuted, fontSize = 11.sp, fontFamily = FontFamily.Monospace, modifier = Modifier.padding(vertical = 2.dp))
-        }
-
-        Spacer(modifier = Modifier.weight(1f))
-
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(ButtonDark, RoundedCornerShape(4.dp))
-                .border(1.dp, ButtonBorderDark, RoundedCornerShape(4.dp))
-                .padding(12.dp)
-        ) {
-            Text("CURRENT TARGET", fontSize = 10.sp, color = TextSecondary, fontWeight = FontWeight.Bold)
-            Text("Eden Nightly (Top Screen)", fontSize = 12.sp, color = White)
-            Text("DisplayID: 001-THOR", fontSize = 10.sp, color = CyanAccent, fontFamily = FontFamily.Monospace)
-        }
-    }
-}
-
-@Composable
-fun ControlCard(
-    modifier: Modifier = Modifier,
-    onOpenAccessibility: () -> Unit,
-    onStartOverlay: () -> Unit,
-    onStopOverlay: () -> Unit,
-    onRefreshStatus: () -> Unit,
-    onCalibrate: () -> Unit,
-    onRunSafeTestGesture: () -> Unit,
-    onDrawLine: () -> Unit,
-    onDrawSquare: () -> Unit,
-    onStop: () -> Unit
-) {
-    Column(
-        modifier = modifier
-            .background(SurfaceDark, RoundedCornerShape(8.dp))
-            .border(1.dp, BorderDark, RoundedCornerShape(8.dp))
-            .padding(20.dp),
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Text("APP CONTROLLER", style = MaterialTheme.typography.labelMedium, color = White, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-            Text("JETPACK COMPOSE", fontSize = 10.sp, color = CyanAccent, fontFamily = FontFamily.Monospace)
-        }
-        
-        SophisticatedButton(onClick = onOpenAccessibility, text = "Open Accessibility Settings", icon = "⚙️")
-        SophisticatedButton(onClick = onRefreshStatus, text = "Refresh Status", icon = "↻")
-        SophisticatedButton(onClick = onStartOverlay, text = "Start Floating Overlay", icon = "☁️")
-        SophisticatedButton(onClick = onStopOverlay, text = "Stop Floating Overlay", icon = "✕")
-        SophisticatedButton(onClick = onRunSafeTestGesture, text = "Run Safe Test Gesture", icon = "→")
-        
-        Button(
-            onClick = onCalibrate,
-            modifier = Modifier.fillMaxWidth().height(48.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = EmeraldAccent.copy(alpha = 0.2f), contentColor = EmeraldAccent),
-            shape = RoundedCornerShape(4.dp),
-            border = androidx.compose.foundation.BorderStroke(1.dp, EmeraldAccent.copy(alpha = 0.4f))
+        AppHeader()
+        CompactStatusPanel()
+        ScrollableTabRow(
+            selectedTabIndex = selectedTab,
+            containerColor = SurfaceDark,
+            contentColor = TextPrimary,
+            edgePadding = 0.dp
         ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("📍", fontSize = 14.sp)
-                Text("Calibrate Canvas", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+            tabs.forEachIndexed { index, title ->
+                Tab(
+                    selected = selectedTab == index,
+                    onClick = { selectedTab = index },
+                    text = {
+                        Text(
+                            title,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                )
             }
         }
 
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            SophisticatedButton(onClick = onDrawLine, text = "Test Line", modifier = Modifier.weight(1f))
-            SophisticatedButton(onClick = onDrawSquare, text = "Test Square", modifier = Modifier.weight(1f))
-        }
-
-        Button(
-            onClick = onStop,
-            modifier = Modifier.fillMaxWidth().height(48.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = RedMuted.copy(alpha = 0.4f), contentColor = RedAccent),
-            shape = RoundedCornerShape(4.dp),
-            border = androidx.compose.foundation.BorderStroke(1.dp, RedAccent.copy(alpha = 0.4f))
-        ) {
-            Text("STOP ALL DRAWING", fontWeight = FontWeight.Bold, fontSize = 12.sp, letterSpacing = 1.5.sp)
+        when (selectedTab) {
+            0 -> StatusSection(onOpenAccessibility, onRefreshStatus, onRunSafeTestGesture)
+            1 -> OverlaySection(onStartOverlay, onStopOverlay)
+            2 -> CalibrationSection(calibrationStore)
+            3 -> TestShapesSection(calibrationStore, onRunCommand)
+            4 -> DebugSection(onRefreshStatus)
         }
     }
 }
 
 @Composable
-fun SophisticatedButton(onClick: () -> Unit, text: String, icon: String? = null, modifier: Modifier = Modifier) {
-    Button(
-        onClick = onClick,
-        modifier = modifier.fillMaxWidth().height(48.dp),
-        colors = ButtonDefaults.buttonColors(containerColor = ButtonDark, contentColor = TextPrimary),
-        shape = RoundedCornerShape(4.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, ButtonBorderDark),
-        contentPadding = PaddingValues(horizontal = 16.dp)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = if (icon != null) Arrangement.Start else Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            if (icon != null) {
-                Box(modifier = Modifier.size(24.dp).background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(4.dp)), contentAlignment = Alignment.Center) {
-                    Text(icon, fontSize = 12.sp)
-                }
-                Spacer(modifier = Modifier.width(12.dp))
-            }
-            Text(text, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-        }
-    }
-}
-
-@Composable
-fun CalibrationCard() {
+fun AppHeader() {
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .background(SurfaceDark, RoundedCornerShape(8.dp))
             .border(1.dp, BorderDark, RoundedCornerShape(8.dp))
-            .padding(20.dp)
+            .padding(14.dp)
     ) {
-        Text("CALIBRATION STORE", style = MaterialTheme.typography.labelMedium, color = White, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-        Spacer(modifier = Modifier.height(16.dp))
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(BackgroundDark, RoundedCornerShape(4.dp))
-                .border(1.dp, BorderDark, RoundedCornerShape(4.dp))
-                .padding(16.dp)
-        ) {
-            Text("// SharedPreferences / calibration_data.xml", color = TextSecondary, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
-            Spacer(modifier = Modifier.height(8.dp))
-            val items = listOf("TOP_LEFT_X" to "144", "TOP_LEFT_Y" to "280", "BOTTOM_RIGHT_X" to "1780", "BOTTOM_RIGHT_Y" to "1020", "TARGET_DISPLAY" to "1")
-            items.forEach { (k, v) ->
-                Row {
-                    Text("$k: ", color = Color(0xFFF59E0B), fontSize = 11.sp, fontFamily = FontFamily.Monospace)
-                    Text(v, color = TextMuted, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
-                }
-            }
-        }
+        Text("Bifrost", color = White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+        Text("Compact Thor controls", color = TextSecondary, fontSize = 13.sp)
     }
 }
 
 @Composable
-fun CoordinateCalibrationCard(
+fun CompactStatusPanel() {
+    Section("Live Status") {
+        StatusRow("Accessibility enabled", BifrostDebug.accessibilityEnabled.value)
+        StatusRow("Accessibility runtime ready", BifrostDebug.accessibilityRuntimeReady.value)
+        StatusRow("Overlay permission granted", BifrostDebug.overlayPermissionGranted.value)
+        StatusRow("Overlay running", BifrostDebug.overlayRunning.value)
+    }
+}
+
+@Composable
+fun StatusSection(
+    onOpenAccessibility: () -> Unit,
+    onRefreshStatus: () -> Unit,
+    onRunSafeTestGesture: () -> Unit
+) {
+    Section("Status") {
+        FullWidthButton("Refresh Status", onRefreshStatus)
+        FullWidthButton("Open Accessibility Settings", onOpenAccessibility)
+        FullWidthButton("Run Safe Test Gesture", onRunSafeTestGesture)
+    }
+}
+
+@Composable
+fun OverlaySection(
+    onStartOverlay: () -> Unit,
+    onStopOverlay: () -> Unit
+) {
+    Section("Overlay") {
+        FullWidthButton("Start Floating Overlay", onStartOverlay)
+        FullWidthButton("Stop Floating Overlay", onStopOverlay, danger = true)
+    }
+}
+
+@Composable
+fun CalibrationSection(calibrationStore: CalibrationStore) {
+    val state = rememberCalibrationUiState(calibrationStore)
+
+    Section("Manual Coordinates") {
+        CoordinateField("Start X", state.startX, { state.startX = it }, { state.startX = nudgeText(state.startX, it) })
+        CoordinateField("Start Y", state.startY, { state.startY = it }, { state.startY = nudgeText(state.startY, it) })
+        CoordinateField("End X", state.endX, { state.endX = it }, { state.endX = nudgeText(state.endX, it) })
+        CoordinateField("End Y", state.endY, { state.endY = it }, { state.endY = nudgeText(state.endY, it) })
+        CoordinateField("Duration ms", state.durationMs, { state.durationMs = it }, { state.durationMs = nudgeText(state.durationMs, it * 10) })
+    }
+
+    Spacer(modifier = Modifier.height(12.dp))
+
+    Section("Canvas Bounds") {
+        CoordinateField("Top-left X", state.topLeftX, { state.topLeftX = it }, { state.topLeftX = nudgeText(state.topLeftX, it) })
+        CoordinateField("Top-left Y", state.topLeftY, { state.topLeftY = it }, { state.topLeftY = nudgeText(state.topLeftY, it) })
+        CoordinateField("Bottom-right X", state.bottomRightX, { state.bottomRightX = it }, { state.bottomRightX = nudgeText(state.bottomRightX, it) })
+        CoordinateField("Bottom-right Y", state.bottomRightY, { state.bottomRightY = it }, { state.bottomRightY = nudgeText(state.bottomRightY, it) })
+        FullWidthButton("Save Calibration", {
+            calibrationStore.saveValues(state.currentValues())
+            BifrostDebug.record("Calibration saved")
+        })
+        FullWidthButton("Reset Calibration", {
+            calibrationStore.resetValues()
+            state.load(calibrationStore.getValues())
+            BifrostDebug.record("Calibration reset to defaults")
+        }, danger = true)
+    }
+}
+
+@Composable
+fun TestShapesSection(
     calibrationStore: CalibrationStore,
     onRunCommand: (ShapeCommand) -> Unit
 ) {
-    val savedValues = remember { calibrationStore.getValues() }
-    var startX by remember { mutableStateOf(savedValues.startX.toInt().toString()) }
-    var startY by remember { mutableStateOf(savedValues.startY.toInt().toString()) }
-    var endX by remember { mutableStateOf(savedValues.endX.toInt().toString()) }
-    var endY by remember { mutableStateOf(savedValues.endY.toInt().toString()) }
-    var durationMs by remember { mutableStateOf(savedValues.durationMs.toString()) }
-    var topLeftX by remember { mutableStateOf(savedValues.topLeftX.toInt().toString()) }
-    var topLeftY by remember { mutableStateOf(savedValues.topLeftY.toInt().toString()) }
-    var bottomRightX by remember { mutableStateOf(savedValues.bottomRightX.toInt().toString()) }
-    var bottomRightY by remember { mutableStateOf(savedValues.bottomRightY.toInt().toString()) }
+    val state = rememberCalibrationUiState(calibrationStore)
 
-    fun currentValues(): CalibrationValues {
-        return CalibrationValues(
-            startX = startX.toFloatOrNull() ?: savedValues.startX,
-            startY = startY.toFloatOrNull() ?: savedValues.startY,
-            endX = endX.toFloatOrNull() ?: savedValues.endX,
-            endY = endY.toFloatOrNull() ?: savedValues.endY,
-            durationMs = durationMs.toLongOrNull()?.coerceAtLeast(50L) ?: savedValues.durationMs,
-            topLeftX = topLeftX.toFloatOrNull() ?: savedValues.topLeftX,
-            topLeftY = topLeftY.toFloatOrNull() ?: savedValues.topLeftY,
-            bottomRightX = bottomRightX.toFloatOrNull() ?: savedValues.bottomRightX,
-            bottomRightY = bottomRightY.toFloatOrNull() ?: savedValues.bottomRightY
-        )
-    }
-
-    fun saveCurrentValues(reason: String): CalibrationValues {
-        val values = currentValues()
+    fun saveForTest(message: String): CalibrationValues {
+        val values = state.currentValues()
         calibrationStore.saveValues(values)
-        BifrostDebug.record(reason)
+        BifrostDebug.record(message)
         return values
     }
 
-    fun resetFields() {
-        calibrationStore.resetValues()
-        val values = calibrationStore.getValues()
-        startX = values.startX.toInt().toString()
-        startY = values.startY.toInt().toString()
-        endX = values.endX.toInt().toString()
-        endY = values.endY.toInt().toString()
-        durationMs = values.durationMs.toString()
-        topLeftX = values.topLeftX.toInt().toString()
-        topLeftY = values.topLeftY.toInt().toString()
-        bottomRightX = values.bottomRightX.toInt().toString()
-        bottomRightY = values.bottomRightY.toInt().toString()
-        BifrostDebug.record("Calibration reset to defaults")
+    Section("Test Shapes") {
+        FullWidthButton("Test Tap", onClick = {
+            val values = saveForTest("Test tap requested")
+            onRunCommand(ShapeCommand.Tap(values.startX, values.startY, values.durationMs))
+        })
+        FullWidthButton("Test Line", onClick = {
+            val values = saveForTest("Test line requested")
+            onRunCommand(ShapeCommand.Line(values.startX, values.startY, values.endX, values.endY, values.durationMs))
+        })
+        FullWidthButton("Test Diagonal", onClick = {
+            saveForTest("Test diagonal requested")
+            onRunCommand(ShapeCommand.CalibratedDiagonal)
+        })
+        FullWidthButton("Test Small Square", onClick = {
+            saveForTest("Test small square requested")
+            onRunCommand(ShapeCommand.CalibratedSmallSquare)
+        })
+        FullWidthButton("Test X Shape", onClick = {
+            saveForTest("Test X shape requested")
+            onRunCommand(ShapeCommand.CalibratedXShape)
+        })
     }
+}
 
+@Composable
+fun DebugSection(onRefreshStatus: () -> Unit) {
+    Section("Debug") {
+        FullWidthButton("Refresh Debug Info", onRefreshStatus)
+        Text("Display Info", color = TextSecondary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+        BifrostDebug.displayInfo.forEach { line ->
+            DebugLine(line)
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        Text("Recent Logs", color = TextSecondary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+        BifrostDebug.messages.forEach { message ->
+            DebugLine(message)
+        }
+    }
+}
+
+@Composable
+fun Section(
+    title: String,
+    content: @Composable ColumnScope.() -> Unit
+) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .background(SurfaceDark, RoundedCornerShape(8.dp))
             .border(1.dp, BorderDark, RoundedCornerShape(8.dp))
-            .padding(20.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        Text("COORDINATE CALIBRATION", style = MaterialTheme.typography.labelMedium, color = White, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+        Text(title, color = White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        content()
+    }
+}
 
-        Text("Manual coordinates", color = TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-        CoordinateField("Start X", startX, { startX = it }, { startX = nudgeText(startX, it) })
-        CoordinateField("Start Y", startY, { startY = it }, { startY = nudgeText(startY, it) })
-        CoordinateField("End X", endX, { endX = it }, { endX = nudgeText(endX, it) })
-        CoordinateField("End Y", endY, { endY = it }, { endY = nudgeText(endY, it) })
-        CoordinateField("Duration ms", durationMs, { durationMs = it }, { durationMs = nudgeText(durationMs, it * 10) })
-
-        Text("Canvas bounds", color = TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-        CoordinateField("Top-left X", topLeftX, { topLeftX = it }, { topLeftX = nudgeText(topLeftX, it) })
-        CoordinateField("Top-left Y", topLeftY, { topLeftY = it }, { topLeftY = nudgeText(topLeftY, it) })
-        CoordinateField("Bottom-right X", bottomRightX, { bottomRightX = it }, { bottomRightX = nudgeText(bottomRightX, it) })
-        CoordinateField("Bottom-right Y", bottomRightY, { bottomRightY = it }, { bottomRightY = nudgeText(bottomRightY, it) })
-
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-            SophisticatedButton(
-                onClick = {
-                    val values = saveCurrentValues("Test tap requested")
-                    onRunCommand(ShapeCommand.Tap(values.startX, values.startY, values.durationMs))
-                },
-                text = "Test Tap",
-                modifier = Modifier.weight(1f)
-            )
-            SophisticatedButton(
-                onClick = {
-                    val values = saveCurrentValues("Test line requested")
-                    onRunCommand(ShapeCommand.Line(values.startX, values.startY, values.endX, values.endY, values.durationMs))
-                },
-                text = "Test Line",
-                modifier = Modifier.weight(1f)
-            )
-        }
-
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-            SophisticatedButton(
-                onClick = {
-                    saveCurrentValues("Test diagonal requested")
-                    onRunCommand(ShapeCommand.CalibratedDiagonal)
-                },
-                text = "Test Diagonal",
-                modifier = Modifier.weight(1f)
-            )
-            SophisticatedButton(
-                onClick = {
-                    saveCurrentValues("Test small square requested")
-                    onRunCommand(ShapeCommand.CalibratedSmallSquare)
-                },
-                text = "Test Small Square",
-                modifier = Modifier.weight(1f)
-            )
-        }
-
-        SophisticatedButton(
-            onClick = {
-                saveCurrentValues("Test X shape requested")
-                onRunCommand(ShapeCommand.CalibratedXShape)
-            },
-            text = "Test X Shape"
+@Composable
+fun StatusRow(label: String, value: Boolean) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(label, color = TextPrimary, fontSize = 14.sp)
+        Text(
+            value.toString(),
+            color = if (value) EmeraldAccent else RedAccent,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Bold,
+            fontFamily = FontFamily.Monospace
         )
+    }
+}
 
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-            SophisticatedButton(
-                onClick = { saveCurrentValues("Calibration saved") },
-                text = "Save Calibration",
-                modifier = Modifier.weight(1f)
-            )
-            SophisticatedButton(
-                onClick = { resetFields() },
-                text = "Reset Calibration",
-                modifier = Modifier.weight(1f)
-            )
-        }
+@Composable
+fun FullWidthButton(
+    text: String,
+    onClick: () -> Unit,
+    danger: Boolean = false
+) {
+    Button(
+        onClick = onClick,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(52.dp),
+        shape = RoundedCornerShape(6.dp),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = if (danger) RedMuted else ButtonDark,
+            contentColor = if (danger) RedAccent else TextPrimary
+        ),
+        border = androidx.compose.foundation.BorderStroke(1.dp, if (danger) RedAccent else ButtonBorderDark),
+        contentPadding = PaddingValues(horizontal = 14.dp)
+    ) {
+        Text(text, fontSize = 15.sp, fontWeight = FontWeight.Bold)
     }
 }
 
@@ -535,29 +387,33 @@ fun CoordinateField(
     onValueChange: (String) -> Unit,
     onNudge: (Int) -> Unit
 ) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        Text(label, color = TextMuted, fontSize = 11.sp, modifier = Modifier.width(92.dp), fontFamily = FontFamily.Monospace)
-        OutlinedTextField(
-            value = value,
-            onValueChange = onValueChange,
-            singleLine = true,
-            textStyle = LocalTextStyle.current.copy(fontSize = 12.sp, fontFamily = FontFamily.Monospace),
-            modifier = Modifier.weight(1f).height(54.dp),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedTextColor = TextPrimary,
-                unfocusedTextColor = TextPrimary,
-                focusedBorderColor = CyanAccent,
-                unfocusedBorderColor = ButtonBorderDark,
-                focusedContainerColor = BackgroundDark,
-                unfocusedContainerColor = BackgroundDark
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(label, color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            OutlinedTextField(
+                value = value,
+                onValueChange = onValueChange,
+                singleLine = true,
+                textStyle = LocalTextStyle.current.copy(fontSize = 16.sp, fontFamily = FontFamily.Monospace),
+                modifier = Modifier
+                    .weight(1f)
+                    .height(58.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = TextPrimary,
+                    unfocusedTextColor = TextPrimary,
+                    focusedBorderColor = CyanAccent,
+                    unfocusedBorderColor = ButtonBorderDark,
+                    focusedContainerColor = BackgroundDark,
+                    unfocusedContainerColor = BackgroundDark
+                )
             )
-        )
-        NudgeButton("-", onClick = { onNudge(-1) })
-        NudgeButton("+", onClick = { onNudge(1) })
+            NudgeButton("-", onClick = { onNudge(-1) })
+            NudgeButton("+", onClick = { onNudge(1) })
+        }
     }
 }
 
@@ -565,157 +421,74 @@ fun CoordinateField(
 fun NudgeButton(text: String, onClick: () -> Unit) {
     Button(
         onClick = onClick,
-        modifier = Modifier.size(36.dp),
-        shape = RoundedCornerShape(4.dp),
+        modifier = Modifier.size(46.dp),
+        shape = RoundedCornerShape(6.dp),
         contentPadding = PaddingValues(0.dp),
         colors = ButtonDefaults.buttonColors(containerColor = ButtonDark, contentColor = TextPrimary),
         border = androidx.compose.foundation.BorderStroke(1.dp, ButtonBorderDark)
     ) {
-        Text(text, fontWeight = FontWeight.Bold)
+        Text(text, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
+fun DebugLine(text: String) {
+    Text(
+        text,
+        color = TextMuted,
+        fontSize = 12.sp,
+        fontFamily = FontFamily.Monospace,
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(BackgroundDark, RoundedCornerShape(4.dp))
+            .padding(8.dp)
+    )
+}
+
+@Composable
+fun rememberCalibrationUiState(calibrationStore: CalibrationStore): CalibrationUiState {
+    val values = remember { calibrationStore.getValues() }
+    return remember { CalibrationUiState(values) }
+}
+
+class CalibrationUiState(values: CalibrationValues) {
+    var startX by mutableStateOf(values.startX.toInt().toString())
+    var startY by mutableStateOf(values.startY.toInt().toString())
+    var endX by mutableStateOf(values.endX.toInt().toString())
+    var endY by mutableStateOf(values.endY.toInt().toString())
+    var durationMs by mutableStateOf(values.durationMs.toString())
+    var topLeftX by mutableStateOf(values.topLeftX.toInt().toString())
+    var topLeftY by mutableStateOf(values.topLeftY.toInt().toString())
+    var bottomRightX by mutableStateOf(values.bottomRightX.toInt().toString())
+    var bottomRightY by mutableStateOf(values.bottomRightY.toInt().toString())
+
+    fun load(values: CalibrationValues) {
+        startX = values.startX.toInt().toString()
+        startY = values.startY.toInt().toString()
+        endX = values.endX.toInt().toString()
+        endY = values.endY.toInt().toString()
+        durationMs = values.durationMs.toString()
+        topLeftX = values.topLeftX.toInt().toString()
+        topLeftY = values.topLeftY.toInt().toString()
+        bottomRightX = values.bottomRightX.toInt().toString()
+        bottomRightY = values.bottomRightY.toInt().toString()
+    }
+
+    fun currentValues(): CalibrationValues {
+        return CalibrationValues(
+            startX = startX.toFloatOrNull() ?: 120f,
+            startY = startY.toFloatOrNull() ?: 120f,
+            endX = endX.toFloatOrNull() ?: 260f,
+            endY = endY.toFloatOrNull() ?: 120f,
+            durationMs = durationMs.toLongOrNull()?.coerceAtLeast(50L) ?: 220L,
+            topLeftX = topLeftX.toFloatOrNull() ?: 100f,
+            topLeftY = topLeftY.toFloatOrNull() ?: 100f,
+            bottomRightX = bottomRightX.toFloatOrNull() ?: 900f,
+            bottomRightY = bottomRightY.toFloatOrNull() ?: 900f
+        )
     }
 }
 
 fun nudgeText(value: String, delta: Int): String {
     return ((value.toIntOrNull() ?: 0) + delta).toString()
-}
-
-@Composable
-fun AccessibilityStatusCard() {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(SurfaceDark, RoundedCornerShape(8.dp))
-            .border(1.dp, BorderDark, RoundedCornerShape(8.dp))
-            .padding(20.dp)
-    ) {
-        Text("ACCESSIBILITY STATUS", style = MaterialTheme.typography.labelMedium, color = White, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-        Spacer(modifier = Modifier.height(12.dp))
-        StatusLine("Service enabled", BifrostDebug.accessibilityEnabled.value)
-        StatusLine("Runtime ready", BifrostDebug.accessibilityRuntimeReady.value)
-    }
-}
-
-@Composable
-fun StatusLine(label: String, value: Boolean) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 3.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(label, color = TextMuted, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
-        Text(
-            value.toString(),
-            color = if (value) EmeraldAccent else RedAccent,
-            fontSize = 12.sp,
-            fontFamily = FontFamily.Monospace,
-            fontWeight = FontWeight.Bold
-        )
-    }
-}
-
-@Composable
-fun DisplayInfoCard() {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(SurfaceDark, RoundedCornerShape(8.dp))
-            .border(1.dp, BorderDark, RoundedCornerShape(8.dp))
-            .padding(20.dp)
-    ) {
-        Text("DISPLAY DEBUG", style = MaterialTheme.typography.labelMedium, color = White, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-        Spacer(modifier = Modifier.height(12.dp))
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(BackgroundDark, RoundedCornerShape(4.dp))
-                .border(1.dp, BorderDark, RoundedCornerShape(4.dp))
-                .padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            BifrostDebug.displayInfo.forEach { line ->
-                Text(line, color = TextMuted, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
-            }
-        }
-    }
-}
-
-@Composable
-fun DebugStatusCard() {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(SurfaceDark, RoundedCornerShape(8.dp))
-            .border(1.dp, BorderDark, RoundedCornerShape(8.dp))
-            .padding(20.dp)
-    ) {
-        Text("DEBUG STATUS", style = MaterialTheme.typography.labelMedium, color = White, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-        Spacer(modifier = Modifier.height(12.dp))
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(BackgroundDark, RoundedCornerShape(4.dp))
-                .border(1.dp, BorderDark, RoundedCornerShape(4.dp))
-                .padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            BifrostDebug.messages.forEach { message ->
-                Text(message, color = TextMuted, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
-            }
-        }
-    }
-}
-
-@Composable
-fun FloatingBubbleMock() {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(160.dp)
-            .background(SurfaceDark, RoundedCornerShape(8.dp))
-            .border(1.dp, BorderDark, RoundedCornerShape(8.dp))
-            .padding(20.dp)
-    ) {
-        Text("FLOATING BUBBLE (MOCK)", style = MaterialTheme.typography.labelMedium, color = White, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-        
-        Box(
-            modifier = Modifier.fillMaxSize().padding(top = 32.dp).border(1.dp, ButtonBorderDark.copy(alpha = 0.5f), RoundedCornerShape(4.dp)),
-            contentAlignment = Alignment.Center
-        ) {
-            Row(
-                modifier = Modifier
-                    .width(180.dp)
-                    .height(40.dp)
-                    .background(ButtonDark, RoundedCornerShape(50))
-                    .border(1.dp, CyanAccent.copy(alpha = 0.5f), RoundedCornerShape(50))
-                    .padding(horizontal = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                Box(
-                    modifier = Modifier.size(32.dp).background(CyanAccent, RoundedCornerShape(50)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text("B", color = Color.Black, fontWeight = FontWeight.Bold)
-                }
-                 SophisticatedMiniButton("START")
-                 SophisticatedMiniButton("PAUSE")
-                 SophisticatedMiniButton("STOP", RedAccent)
-            }
-        }
-    }
-}
-
-@Composable
-fun SophisticatedMiniButton(text: String, color: Color = White) {
-    Box(
-        modifier = Modifier
-            .width(42.dp)
-            .height(28.dp)
-            .background(ButtonBorderDark, RoundedCornerShape(4.dp)),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(text, fontSize = 8.sp, fontWeight = FontWeight.Bold, color = color.copy(alpha = 0.8f))
-    }
 }

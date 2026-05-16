@@ -20,6 +20,8 @@ object BifrostDebug {
     val messages = mutableStateListOf("Bifrost ready")
     val accessibilityEnabled = mutableStateOf(false)
     val accessibilityRuntimeReady = mutableStateOf(false)
+    val overlayPermissionGranted = mutableStateOf(false)
+    val overlayRunning = mutableStateOf(false)
     val displayInfo = mutableStateListOf("Display info not refreshed yet")
 
     fun record(message: String) {
@@ -39,6 +41,17 @@ object BifrostDebug {
         val enabled = isBifrostAccessibilityEnabled(context)
         accessibilityEnabled.value = enabled
         record("Accessibility enabled in settings: $enabled")
+    }
+
+    fun refreshOverlayPermission(context: Context) {
+        val granted = Settings.canDrawOverlays(context)
+        overlayPermissionGranted.value = granted
+        record("Overlay permission granted: $granted")
+    }
+
+    fun setOverlayRunning(isRunning: Boolean) {
+        overlayRunning.value = isRunning
+        record("Overlay running: $isRunning")
     }
 
     fun refreshDisplayInfo(context: Context) {
