@@ -89,6 +89,8 @@ class DrawAccessibilityService : AccessibilityService() {
         }, null)
         if (!dispatched) {
             BifrostDebug.record("Gesture dispatch failed: ${plan.commandName} stroke ${index + 1}/${plan.strokes.size}")
+        } else {
+            BifrostDebug.record("Gesture dispatch accepted: ${plan.commandName} stroke ${index + 1}/${plan.strokes.size}")
         }
     }
 

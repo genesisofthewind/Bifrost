@@ -292,7 +292,27 @@ fun TestShapesSection(
         })
         FullWidthButton("Test Diagonal", onClick = {
             saveForTest("Test diagonal requested")
-            onRunCommand(ShapeCommand.CalibratedDiagonal)
+            onRunCommand(ShapeCommand.DiagonalTopLeftToBottomRight)
+        })
+        FullWidthButton("Diagonal TopLeft to BottomRight", onClick = {
+            saveForTest("Diagonal TL to BR requested")
+            onRunCommand(ShapeCommand.DiagonalTopLeftToBottomRight)
+        })
+        FullWidthButton("Diagonal TopRight to BottomLeft", onClick = {
+            saveForTest("Diagonal TR to BL requested")
+            onRunCommand(ShapeCommand.DiagonalTopRightToBottomLeft)
+        })
+        FullWidthButton("Diagonal BottomLeft to TopRight", onClick = {
+            saveForTest("Diagonal BL to TR requested")
+            onRunCommand(ShapeCommand.DiagonalBottomLeftToTopRight)
+        })
+        FullWidthButton("Diagonal BottomRight to TopLeft", onClick = {
+            saveForTest("Diagonal BR to TL requested")
+            onRunCommand(ShapeCommand.DiagonalBottomRightToTopLeft)
+        })
+        FullWidthButton("Segmented Diagonal Test", onClick = {
+            saveForTest("Segmented diagonal requested")
+            onRunCommand(ShapeCommand.SegmentedDiagonal)
         })
         FullWidthButton("Test Small Square", onClick = {
             saveForTest("Test small square requested")
@@ -305,6 +325,10 @@ fun TestShapesSection(
         FullWidthButton("Test X Shape", onClick = {
             saveForTest("Test X shape requested")
             onRunCommand(ShapeCommand.CalibratedXShape)
+        })
+        FullWidthButton("Segmented X Test", onClick = {
+            saveForTest("Segmented X requested")
+            onRunCommand(ShapeCommand.SegmentedXShape)
         })
     }
 }

@@ -12,6 +12,7 @@ import android.view.View
 import android.view.WindowManager
 import android.widget.Button
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import com.genesisofthewind.bifrost.BifrostDebug
 import com.genesisofthewind.bifrost.engine.ShapeCommand
@@ -142,51 +143,84 @@ class FloatingOverlayService : Service() {
                 setPadding(0, 0, 0, dp(6))
             })
 
-            addView(menuButton("Start Test Gesture") {
-                BifrostDebug.record("Overlay start test gesture tapped")
-                DrawAccessibilityService.getInstance()?.executeCommand(ShapeCommand.SafeTestGesture)
-                    ?: BifrostDebug.record("Accessibility service is not connected")
-            })
+            val actions = LinearLayout(this@FloatingOverlayService).apply {
+                orientation = LinearLayout.VERTICAL
 
-            addView(menuButton("Run Calibrated Test Line") {
-                BifrostDebug.record("Overlay calibrated line tapped")
-                DrawAccessibilityService.getInstance()?.executeCommand(ShapeCommand.CalibratedLine)
-                    ?: BifrostDebug.record("Accessibility service is not connected")
-            })
+                addView(sectionLabel("Basic"))
+                addView(menuButton("Start Test Gesture") {
+                    BifrostDebug.record("Overlay start test gesture tapped")
+                    executeOverlayCommand(ShapeCommand.SafeTestGesture)
+                })
 
-            addView(menuButton("Run Calibrated Test Square") {
-                BifrostDebug.record("Overlay calibrated square tapped")
-                DrawAccessibilityService.getInstance()?.executeCommand(ShapeCommand.CalibratedSmallSquare)
-                    ?: BifrostDebug.record("Accessibility service is not connected")
-            })
+                addView(sectionLabel("Calibrated"))
+                addView(menuButton("Test Line") {
+                    BifrostDebug.record("Overlay calibrated line tapped")
+                    executeOverlayCommand(ShapeCommand.CalibratedLine)
+                })
 
-            addView(menuButton("Run Known-Good Square") {
-                BifrostDebug.record("Overlay known-good square tapped")
-                DrawAccessibilityService.getInstance()?.executeCommand(ShapeCommand.CalibratedSmallSquare)
-                    ?: BifrostDebug.record("Accessibility service is not connected")
-            })
+                addView(menuButton("Known-Good Square") {
+                    BifrostDebug.record("Overlay known-good square tapped")
+                    executeOverlayCommand(ShapeCommand.CalibratedSmallSquare)
+                })
 
-            addView(menuButton("Run Calibrated Test Diagonal") {
-                BifrostDebug.record("Overlay calibrated diagonal tapped")
-                DrawAccessibilityService.getInstance()?.executeCommand(ShapeCommand.CalibratedDiagonal)
-                    ?: BifrostDebug.record("Accessibility service is not connected")
-            })
+                addView(menuButton("Diagonal TL->BR") {
+                    BifrostDebug.record("Overlay diagonal TL->BR tapped")
+                    executeOverlayCommand(ShapeCommand.DiagonalTopLeftToBottomRight)
+                })
 
-            addView(menuButton("Run Calibrated Test X") {
-                BifrostDebug.record("Overlay calibrated X tapped")
-                DrawAccessibilityService.getInstance()?.executeCommand(ShapeCommand.CalibratedXShape)
-                    ?: BifrostDebug.record("Accessibility service is not connected")
-            })
+                addView(menuButton("Diagonal TR->BL") {
+                    BifrostDebug.record("Overlay diagonal TR->BL tapped")
+                    executeOverlayCommand(ShapeCommand.DiagonalTopRightToBottomLeft)
+                })
 
-            addView(menuButton("Pause/Stop Current Action") {
-                BifrostDebug.record("Overlay stop action tapped")
-                DrawAccessibilityService.getInstance()?.executeCommand(ShapeCommand.Stop)
+                addView(menuButton("X Shape") {
+                    BifrostDebug.record("Overlay calibrated X tapped")
+                    executeOverlayCommand(ShapeCommand.CalibratedXShape)
+                })
+
+                addView(sectionLabel("Debug"))
+                addView(menuButton("Segmented Diagonal") {
+                    BifrostDebug.record("Overlay segmented diagonal tapped")
+                    executeOverlayCommand(ShapeCommand.SegmentedDiagonal)
+                })
+
+                addView(menuButton("Segmented X") {
+                    BifrostDebug.record("Overlay segmented X tapped")
+                    executeOverlayCommand(ShapeCommand.SegmentedXShape)
+                })
+
+                addView(menuButton("Pause/Stop Action") {
+                    BifrostDebug.record("Overlay stop action tapped")
+                    executeOverlayCommand(ShapeCommand.Stop)
+                })
+            }
+
+            addView(ScrollView(this@FloatingOverlayService).apply {
+                addView(actions)
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    dp(260)
+                )
             })
 
             addView(menuButton("Close Overlay") {
                 BifrostDebug.record("Overlay close tapped")
                 stopSelf()
             })
+        }
+    }
+
+    private fun executeOverlayCommand(command: ShapeCommand) {
+        DrawAccessibilityService.getInstance()?.executeCommand(command)
+            ?: BifrostDebug.record("Accessibility service is not connected")
+    }
+
+    private fun sectionLabel(text: String): TextView {
+        return TextView(this).apply {
+            this.text = text
+            textSize = 11f
+            setTextColor(Color.LTGRAY)
+            setPadding(0, dp(6), 0, dp(2))
         }
     }
 
