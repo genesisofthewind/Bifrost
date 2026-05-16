@@ -1,8 +1,45 @@
-node_modules/
+# Gradle
+.gradle/
 build/
+**/build/
+
+# Android Studio / IntelliJ
+.idea/
+*.iml
+local.properties
+
+# Android build outputs
+.build-outputs/
+captures/
+*.apk
+*.aab
+*.ap_
+*.dex
+
+# Signing keys and secrets
+*.jks
+*.keystore
+debug.keystore
+debug.keystore.base64
+.env
+.env.*
+!.env.example
+
+# Kotlin / Java
+*.class
+*.jar
+!gradle/wrapper/gradle-wrapper.jar
+*.war
+*.nar
+*.ear
+hs_err_pid*
+
+# Node/web scaffold leftovers
+node_modules/
 dist/
 coverage/
+
+# OS / logs
 .DS_Store
+Thumbs.db
 *.log
-.env*
-!.env.example

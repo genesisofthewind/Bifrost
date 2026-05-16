@@ -1,6 +1,6 @@
-# ThorDrawBridge
+# Bifrost
 
-**ThorDrawBridge** is an automation tool designed specifically for the **AYN Thor** dual-screen Android handheld. Its primary goal is to automate drawing within games like *Tomodachi Life: Living the Dream* (running in emulators like Eden Nightly) on the top screen.
+**Bifrost** is an automation tool designed specifically for the **AYN Thor** dual-screen Android handheld. Its primary goal is to automate drawing within games like *Tomodachi Life: Living the Dream* (running in emulators like Eden Nightly) on the top screen.
 
 ## Current Project Status: MVP Skeleton
 This project is currently in the **MVP Skeleton** phase. It establishes the architectural foundation for:
@@ -22,7 +22,7 @@ This project is currently in the **MVP Skeleton** phase. It establishes the arch
 - **Overlays**: Supported via `SYSTEM_ALERT_WINDOW`.
 
 ## How to use
-1. **Accessibility**: Open Accessibility Settings from the app and enable "ThorDrawBridge".
+1. **Accessibility**: Open Accessibility Settings from the app and enable "Bifrost".
 2. **Overlay**: Grant "Display over other apps" permission.
 3. **Calibrate**: Press "Calibrate" (currently mocks TL/BR coordinates) to define the target drawing area.
 4. **Draw**: Use the on-screen buttons or the floating bubble to trigger test patterns.

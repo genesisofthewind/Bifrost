@@ -6,11 +6,11 @@ plugins {
 }
 
 android {
-    namespace = "com.thor.drawbridge"
+    namespace = "com.genesisofthewind.bifrost"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.thor.drawbridge"
+        applicationId = "com.genesisofthewind.bifrost"
         minSdk = 26
         targetSdk = 36
         versionCode = 1

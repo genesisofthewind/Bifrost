@@ -40,5 +40,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "ThorDrawBridge"
+rootProject.name = "Bifrost"
 include(":app")
