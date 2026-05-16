@@ -21,6 +21,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.genesisofthewind.bifrost.data.CalibrationValues
 import com.genesisofthewind.bifrost.data.CalibrationStore
 import com.genesisofthewind.bifrost.engine.ShapeCommand
 import com.genesisofthewind.bifrost.services.DrawAccessibilityService
@@ -39,12 +40,14 @@ class MainActivity : ComponentActivity() {
             BifrostTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = BackgroundDark) {
                     MainScreen(
+                        calibrationStore = calibrationStore,
                         onOpenAccessibility = { openAccessibilitySettings() },
                         onStartOverlay = { startOverlay() },
                         onStopOverlay = { stopOverlay() },
                         onRefreshStatus = { refreshStatus() },
                         onCalibrate = { calibrate() },
                         onRunSafeTestGesture = { runSafeTestGesture() },
+                        onRunCommand = { runGesture(it) },
                         onDrawLine = { runGesture(ShapeCommand.TestLine) },
                         onDrawSquare = { runGesture(ShapeCommand.TestSquare) },
                         onStop = { runGesture(ShapeCommand.Stop) }
@@ -104,12 +107,14 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun MainScreen(
+    calibrationStore: CalibrationStore,
     onOpenAccessibility: () -> Unit,
     onStartOverlay: () -> Unit,
     onStopOverlay: () -> Unit,
     onRefreshStatus: () -> Unit,
     onCalibrate: () -> Unit,
     onRunSafeTestGesture: () -> Unit,
+    onRunCommand: (ShapeCommand) -> Unit,
     onDrawLine: () -> Unit,
     onDrawSquare: () -> Unit,
     onStop: () -> Unit
@@ -134,19 +139,27 @@ fun MainScreen(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(24.dp)
                 ) {
-                    // Control Card
-                    ControlCard(
+                    Column(
                         modifier = Modifier.weight(1f),
-                        onOpenAccessibility = onOpenAccessibility,
-                        onStartOverlay = onStartOverlay,
-                        onStopOverlay = onStopOverlay,
-                        onRefreshStatus = onRefreshStatus,
-                        onCalibrate = onCalibrate,
-                        onRunSafeTestGesture = onRunSafeTestGesture,
-                        onDrawLine = onDrawLine,
-                        onDrawSquare = onDrawSquare,
-                        onStop = onStop
-                    )
+                        verticalArrangement = Arrangement.spacedBy(24.dp)
+                    ) {
+                        ControlCard(
+                            modifier = Modifier.fillMaxWidth(),
+                            onOpenAccessibility = onOpenAccessibility,
+                            onStartOverlay = onStartOverlay,
+                            onStopOverlay = onStopOverlay,
+                            onRefreshStatus = onRefreshStatus,
+                            onCalibrate = onCalibrate,
+                            onRunSafeTestGesture = onRunSafeTestGesture,
+                            onDrawLine = onDrawLine,
+                            onDrawSquare = onDrawSquare,
+                            onStop = onStop
+                        )
+                        CoordinateCalibrationCard(
+                            calibrationStore = calibrationStore,
+                            onRunCommand = onRunCommand
+                        )
+                    }
 
                     // Info Column
                     Column(
@@ -155,7 +168,6 @@ fun MainScreen(
                     ) {
                         AccessibilityStatusCard()
                         DisplayInfoCard()
-                        CalibrationCard()
                         DebugStatusCard()
                         FloatingBubbleMock()
                     }
@@ -378,6 +390,193 @@ fun CalibrationCard() {
             }
         }
     }
+}
+
+@Composable
+fun CoordinateCalibrationCard(
+    calibrationStore: CalibrationStore,
+    onRunCommand: (ShapeCommand) -> Unit
+) {
+    val savedValues = remember { calibrationStore.getValues() }
+    var startX by remember { mutableStateOf(savedValues.startX.toInt().toString()) }
+    var startY by remember { mutableStateOf(savedValues.startY.toInt().toString()) }
+    var endX by remember { mutableStateOf(savedValues.endX.toInt().toString()) }
+    var endY by remember { mutableStateOf(savedValues.endY.toInt().toString()) }
+    var durationMs by remember { mutableStateOf(savedValues.durationMs.toString()) }
+    var topLeftX by remember { mutableStateOf(savedValues.topLeftX.toInt().toString()) }
+    var topLeftY by remember { mutableStateOf(savedValues.topLeftY.toInt().toString()) }
+    var bottomRightX by remember { mutableStateOf(savedValues.bottomRightX.toInt().toString()) }
+    var bottomRightY by remember { mutableStateOf(savedValues.bottomRightY.toInt().toString()) }
+
+    fun currentValues(): CalibrationValues {
+        return CalibrationValues(
+            startX = startX.toFloatOrNull() ?: savedValues.startX,
+            startY = startY.toFloatOrNull() ?: savedValues.startY,
+            endX = endX.toFloatOrNull() ?: savedValues.endX,
+            endY = endY.toFloatOrNull() ?: savedValues.endY,
+            durationMs = durationMs.toLongOrNull()?.coerceAtLeast(50L) ?: savedValues.durationMs,
+            topLeftX = topLeftX.toFloatOrNull() ?: savedValues.topLeftX,
+            topLeftY = topLeftY.toFloatOrNull() ?: savedValues.topLeftY,
+            bottomRightX = bottomRightX.toFloatOrNull() ?: savedValues.bottomRightX,
+            bottomRightY = bottomRightY.toFloatOrNull() ?: savedValues.bottomRightY
+        )
+    }
+
+    fun saveCurrentValues(reason: String): CalibrationValues {
+        val values = currentValues()
+        calibrationStore.saveValues(values)
+        BifrostDebug.record(reason)
+        return values
+    }
+
+    fun resetFields() {
+        calibrationStore.resetValues()
+        val values = calibrationStore.getValues()
+        startX = values.startX.toInt().toString()
+        startY = values.startY.toInt().toString()
+        endX = values.endX.toInt().toString()
+        endY = values.endY.toInt().toString()
+        durationMs = values.durationMs.toString()
+        topLeftX = values.topLeftX.toInt().toString()
+        topLeftY = values.topLeftY.toInt().toString()
+        bottomRightX = values.bottomRightX.toInt().toString()
+        bottomRightY = values.bottomRightY.toInt().toString()
+        BifrostDebug.record("Calibration reset to defaults")
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(SurfaceDark, RoundedCornerShape(8.dp))
+            .border(1.dp, BorderDark, RoundedCornerShape(8.dp))
+            .padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Text("COORDINATE CALIBRATION", style = MaterialTheme.typography.labelMedium, color = White, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+
+        Text("Manual coordinates", color = TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+        CoordinateField("Start X", startX, { startX = it }, { startX = nudgeText(startX, it) })
+        CoordinateField("Start Y", startY, { startY = it }, { startY = nudgeText(startY, it) })
+        CoordinateField("End X", endX, { endX = it }, { endX = nudgeText(endX, it) })
+        CoordinateField("End Y", endY, { endY = it }, { endY = nudgeText(endY, it) })
+        CoordinateField("Duration ms", durationMs, { durationMs = it }, { durationMs = nudgeText(durationMs, it * 10) })
+
+        Text("Canvas bounds", color = TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+        CoordinateField("Top-left X", topLeftX, { topLeftX = it }, { topLeftX = nudgeText(topLeftX, it) })
+        CoordinateField("Top-left Y", topLeftY, { topLeftY = it }, { topLeftY = nudgeText(topLeftY, it) })
+        CoordinateField("Bottom-right X", bottomRightX, { bottomRightX = it }, { bottomRightX = nudgeText(bottomRightX, it) })
+        CoordinateField("Bottom-right Y", bottomRightY, { bottomRightY = it }, { bottomRightY = nudgeText(bottomRightY, it) })
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            SophisticatedButton(
+                onClick = {
+                    val values = saveCurrentValues("Test tap requested")
+                    onRunCommand(ShapeCommand.Tap(values.startX, values.startY, values.durationMs))
+                },
+                text = "Test Tap",
+                modifier = Modifier.weight(1f)
+            )
+            SophisticatedButton(
+                onClick = {
+                    val values = saveCurrentValues("Test line requested")
+                    onRunCommand(ShapeCommand.Line(values.startX, values.startY, values.endX, values.endY, values.durationMs))
+                },
+                text = "Test Line",
+                modifier = Modifier.weight(1f)
+            )
+        }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            SophisticatedButton(
+                onClick = {
+                    saveCurrentValues("Test diagonal requested")
+                    onRunCommand(ShapeCommand.CalibratedDiagonal)
+                },
+                text = "Test Diagonal",
+                modifier = Modifier.weight(1f)
+            )
+            SophisticatedButton(
+                onClick = {
+                    saveCurrentValues("Test small square requested")
+                    onRunCommand(ShapeCommand.CalibratedSmallSquare)
+                },
+                text = "Test Small Square",
+                modifier = Modifier.weight(1f)
+            )
+        }
+
+        SophisticatedButton(
+            onClick = {
+                saveCurrentValues("Test X shape requested")
+                onRunCommand(ShapeCommand.CalibratedXShape)
+            },
+            text = "Test X Shape"
+        )
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            SophisticatedButton(
+                onClick = { saveCurrentValues("Calibration saved") },
+                text = "Save Calibration",
+                modifier = Modifier.weight(1f)
+            )
+            SophisticatedButton(
+                onClick = { resetFields() },
+                text = "Reset Calibration",
+                modifier = Modifier.weight(1f)
+            )
+        }
+    }
+}
+
+@Composable
+fun CoordinateField(
+    label: String,
+    value: String,
+    onValueChange: (String) -> Unit,
+    onNudge: (Int) -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text(label, color = TextMuted, fontSize = 11.sp, modifier = Modifier.width(92.dp), fontFamily = FontFamily.Monospace)
+        OutlinedTextField(
+            value = value,
+            onValueChange = onValueChange,
+            singleLine = true,
+            textStyle = LocalTextStyle.current.copy(fontSize = 12.sp, fontFamily = FontFamily.Monospace),
+            modifier = Modifier.weight(1f).height(54.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedTextColor = TextPrimary,
+                unfocusedTextColor = TextPrimary,
+                focusedBorderColor = CyanAccent,
+                unfocusedBorderColor = ButtonBorderDark,
+                focusedContainerColor = BackgroundDark,
+                unfocusedContainerColor = BackgroundDark
+            )
+        )
+        NudgeButton("-", onClick = { onNudge(-1) })
+        NudgeButton("+", onClick = { onNudge(1) })
+    }
+}
+
+@Composable
+fun NudgeButton(text: String, onClick: () -> Unit) {
+    Button(
+        onClick = onClick,
+        modifier = Modifier.size(36.dp),
+        shape = RoundedCornerShape(4.dp),
+        contentPadding = PaddingValues(0.dp),
+        colors = ButtonDefaults.buttonColors(containerColor = ButtonDark, contentColor = TextPrimary),
+        border = androidx.compose.foundation.BorderStroke(1.dp, ButtonBorderDark)
+    ) {
+        Text(text, fontWeight = FontWeight.Bold)
+    }
+}
+
+fun nudgeText(value: String, delta: Int): String {
+    return ((value.toIntOrNull() ?: 0) + delta).toString()
 }
 
 @Composable
