@@ -1,199 +1,149 @@
 package com.genesisofthewind.bifrost.engine
 
-import android.accessibilityservice.GestureDescription
-import android.graphics.Path
 import com.genesisofthewind.bifrost.data.CalibrationStore
 import com.genesisofthewind.bifrost.data.CalibrationValues
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 
-data class GestureStep(
-    val name: String,
-    val coordinates: String,
-    val gesture: GestureDescription
+data class StrokeSpec(
+    val startX: Float,
+    val startY: Float,
+    val endX: Float,
+    val endY: Float,
+    val durationMs: Long,
+    val delayAfterMs: Long = 140L
+) {
+    fun describe(index: Int): String {
+        return "stroke $index: $startX,$startY -> $endX,$endY duration=$durationMs delayAfter=$delayAfterMs"
+    }
+}
+
+data class StrokePlan(
+    val commandName: String,
+    val debugLines: List<String>,
+    val strokes: List<StrokeSpec>
 )
 
 class DrawEngine(private val calibrationStore: CalibrationStore) {
 
-    fun createGestureForCommand(command: ShapeCommand): GestureDescription? {
-        return createGestureStepsForCommand(command).firstOrNull()?.gesture
-    }
+    fun createStrokePlanForCommand(command: ShapeCommand): StrokePlan {
+        val values = calibrationStore.getValues()
+        val legacyTopLeft = calibrationStore.getTopLeft()
+        val legacyBottomRight = calibrationStore.getBottomRight()
+        val commandName = command.javaClass.simpleName
 
-    fun createGestureStepsForCommand(command: ShapeCommand): List<GestureStep> {
-        val (tlX, tlY) = calibrationStore.getTopLeft()
-        val (brX, brY) = calibrationStore.getBottomRight()
-        
-        val width = brX - tlX
-        val height = brY - tlY
-
-        return when (command) {
-            is ShapeCommand.Tap -> {
-                val path = Path()
-                path.moveTo(command.x, command.y)
-                path.lineTo(command.x + 1f, command.y + 1f)
-                listOf(
-                    GestureStep(
-                        "Tap",
-                        "tap ${command.x},${command.y} duration=${command.durationMs}",
-                        createStroke(path, command.durationMs.coerceAtLeast(50L))
-                    )
-                )
-            }
-            is ShapeCommand.Line -> {
-                val path = Path()
-                path.moveTo(command.startX, command.startY)
-                path.lineTo(command.endX, command.endY)
-                listOf(
-                    GestureStep(
-                        "Line",
-                        "line ${command.startX},${command.startY} -> ${command.endX},${command.endY} duration=${command.durationMs}",
-                        createStroke(path, command.durationMs.coerceAtLeast(50L))
-                    )
-                )
-            }
+        val strokes = when (command) {
+            is ShapeCommand.Tap -> listOf(
+                StrokeSpec(command.x, command.y, command.x + 1f, command.y + 1f, command.durationMs.coerceAtLeast(50L), 0L)
+            )
+            is ShapeCommand.Line -> listOf(
+                StrokeSpec(command.startX, command.startY, command.endX, command.endY, command.durationMs.coerceAtLeast(50L), 0L)
+            )
             is ShapeCommand.SafeTestGesture -> {
-                val safeY = tlY + (height * 0.8f)
-                val startX = tlX + (width * 0.1f)
-                val endX = tlX + (width * 0.2f)
-                val path = Path()
-                path.moveTo(startX, safeY)
-                path.lineTo(endX, safeY)
-                listOf(
-                    GestureStep(
-                        "SafeTestGesture",
-                        "safe line $startX,$safeY -> $endX,$safeY duration=180",
-                        createStroke(path, 180)
-                    )
-                )
+                val bounds = Bounds.fromLegacy(legacyTopLeft, legacyBottomRight)
+                val y = bounds.top + bounds.height * 0.8f
+                listOf(StrokeSpec(bounds.left + bounds.width * 0.1f, y, bounds.left + bounds.width * 0.2f, y, 180L, 0L))
             }
             is ShapeCommand.CalibratedLine -> {
-                val values = calibrationStore.getValues()
-                val path = Path()
-                path.moveTo(values.startX, values.startY)
-                path.lineTo(values.endX, values.endY)
-                listOf(
-                    GestureStep(
-                        "CalibratedLine",
-                        "line ${values.startX},${values.startY} -> ${values.endX},${values.endY} duration=${values.durationMs}",
-                        createStroke(path, values.durationMs)
-                    )
-                )
+                val bounds = Bounds.fromValues(values)
+                val inset = bounds.inset()
+                val y = inset.top + inset.height / 2f
+                listOf(StrokeSpec(inset.left, y, inset.right, y, values.durationMs.coerceAtLeast(300L), 0L))
             }
             is ShapeCommand.CalibratedDiagonal -> {
-                val values = calibrationStore.getValues()
-                val bounds = insetBounds(values)
-                val path = Path()
-                path.moveTo(bounds.left, bounds.top)
-                path.lineTo(bounds.right, bounds.bottom)
-                listOf(
-                    GestureStep(
-                        "CalibratedDiagonal",
-                        "diagonal ${bounds.left},${bounds.top} -> ${bounds.right},${bounds.bottom} duration=${values.durationMs.coerceAtLeast(400L)}",
-                        createStroke(path, values.durationMs.coerceAtLeast(400L))
-                    )
-                )
+                val inset = Bounds.fromValues(values).inset()
+                listOf(StrokeSpec(inset.left, inset.top, inset.right, inset.bottom, values.durationMs.coerceAtLeast(400L), 0L))
             }
             is ShapeCommand.CalibratedSmallSquare -> {
-                val values = calibrationStore.getValues()
-                val width = values.bottomRightX - values.topLeftX
-                val height = values.bottomRightY - values.topLeftY
-                val size = minOf(width, height) * 0.2f
-                val left = values.topLeftX + (width - size) / 2f
-                val top = values.topLeftY + (height - size) / 2f
-                val path = Path()
-                path.moveTo(left, top)
-                path.lineTo(left + size, top)
-                path.lineTo(left + size, top + size)
-                path.lineTo(left, top + size)
-                path.lineTo(left, top)
+                val inset = Bounds.fromValues(values).inset()
+                val size = min(inset.width, inset.height) * 0.2f
+                val left = inset.left + (inset.width - size) / 2f
+                val top = inset.top + (inset.height - size) / 2f
+                val right = left + size
+                val bottom = top + size
+                val sideDuration = max(90L, values.durationMs.coerceAtLeast(360L) / 4L)
                 listOf(
-                    GestureStep(
-                        "CalibratedSmallSquare",
-                        "square left=$left top=$top size=$size duration=${values.durationMs.coerceAtLeast(300L)}",
-                        createStroke(path, values.durationMs.coerceAtLeast(300L))
-                    )
+                    StrokeSpec(left, top, right, top, sideDuration),
+                    StrokeSpec(right, top, right, bottom, sideDuration),
+                    StrokeSpec(right, bottom, left, bottom, sideDuration),
+                    StrokeSpec(left, bottom, left, top, sideDuration, 0L)
                 )
             }
             is ShapeCommand.CalibratedXShape -> {
-                val values = calibrationStore.getValues()
-                val bounds = insetBounds(values)
-                val pathA = Path()
-                pathA.moveTo(bounds.left, bounds.top)
-                pathA.lineTo(bounds.right, bounds.bottom)
-                val pathB = Path()
-                pathB.moveTo(bounds.right, bounds.top)
-                pathB.lineTo(bounds.left, bounds.bottom)
+                val inset = Bounds.fromValues(values).inset()
                 val duration = values.durationMs.coerceAtLeast(400L)
                 listOf(
-                    GestureStep(
-                        "CalibratedXShape stroke 1",
-                        "x stroke 1 ${bounds.left},${bounds.top} -> ${bounds.right},${bounds.bottom} duration=$duration",
-                        createStroke(pathA, duration)
-                    ),
-                    GestureStep(
-                        "CalibratedXShape stroke 2",
-                        "x stroke 2 ${bounds.right},${bounds.top} -> ${bounds.left},${bounds.bottom} duration=$duration",
-                        createStroke(pathB, duration)
-                    )
+                    StrokeSpec(inset.left, inset.top, inset.right, inset.bottom, duration),
+                    StrokeSpec(inset.right, inset.top, inset.left, inset.bottom, duration, 0L)
                 )
             }
             is ShapeCommand.TestLine -> {
-                val path = Path()
-                path.moveTo(tlX, tlY)
-                path.lineTo(brX, brY)
-                listOf(
-                    GestureStep(
-                        "TestLine",
-                        "test line $tlX,$tlY -> $brX,$brY duration=500",
-                        createStroke(path, 500)
-                    )
-                )
+                val bounds = Bounds.fromLegacy(legacyTopLeft, legacyBottomRight)
+                listOf(StrokeSpec(bounds.left, bounds.top, bounds.right, bounds.bottom, 500L, 0L))
             }
             is ShapeCommand.TestSquare -> {
-                val path = Path()
-                path.moveTo(tlX, tlY)
-                path.lineTo(tlX + width, tlY)
-                path.lineTo(tlX + width, tlY + height)
-                path.lineTo(tlX, tlY + height)
-                path.lineTo(tlX, tlY)
+                val bounds = Bounds.fromLegacy(legacyTopLeft, legacyBottomRight)
                 listOf(
-                    GestureStep(
-                        "TestSquare",
-                        "test square left=$tlX top=$tlY width=$width height=$height duration=1000",
-                        createStroke(path, 1000)
-                    )
+                    StrokeSpec(bounds.left, bounds.top, bounds.right, bounds.top, 250L),
+                    StrokeSpec(bounds.right, bounds.top, bounds.right, bounds.bottom, 250L),
+                    StrokeSpec(bounds.right, bounds.bottom, bounds.left, bounds.bottom, 250L),
+                    StrokeSpec(bounds.left, bounds.bottom, bounds.left, bounds.top, 250L, 0L)
                 )
             }
             is ShapeCommand.Stop -> emptyList()
         }
+
+        val bounds = Bounds.fromValues(values)
+        val inset = bounds.inset()
+        val debugLines = buildList {
+            add("command: $commandName")
+            add("canvas bounds: left=${bounds.left}, top=${bounds.top}, right=${bounds.right}, bottom=${bounds.bottom}")
+            add("safety inset: ${bounds.safetyInset}")
+            add("inset bounds: left=${inset.left}, top=${inset.top}, right=${inset.right}, bottom=${inset.bottom}")
+            strokes.forEachIndexed { index, stroke -> add(stroke.describe(index + 1)) }
+        }
+
+        return StrokePlan(commandName, debugLines, strokes)
     }
 
-    private fun createStroke(path: Path, duration: Long): GestureDescription {
-        val stroke = GestureDescription.StrokeDescription(path, 0, duration)
-        return GestureDescription.Builder().addStroke(stroke).build()
-    }
-
-    private fun insetBounds(values: CalibrationValues): InsetBounds {
-        val left = min(values.topLeftX, values.bottomRightX)
-        val right = max(values.topLeftX, values.bottomRightX)
-        val top = min(values.topLeftY, values.bottomRightY)
-        val bottom = max(values.topLeftY, values.bottomRightY)
-        val width = max(1f, abs(right - left))
-        val height = max(1f, abs(bottom - top))
-        val margin = min(width, height).coerceAtMost(120f) * 0.08f
-        return InsetBounds(
-            left = left + margin,
-            top = top + margin,
-            right = right - margin,
-            bottom = bottom - margin
-        )
-    }
-
-    private data class InsetBounds(
+    private data class Bounds(
         val left: Float,
         val top: Float,
         val right: Float,
         val bottom: Float
-    )
+    ) {
+        val width: Float = max(1f, abs(right - left))
+        val height: Float = max(1f, abs(bottom - top))
+        val safetyInset: Float = min(width, height).coerceAtMost(120f) * 0.08f
+
+        fun inset(): Bounds {
+            return Bounds(
+                left = left + safetyInset,
+                top = top + safetyInset,
+                right = right - safetyInset,
+                bottom = bottom - safetyInset
+            )
+        }
+
+        companion object {
+            fun fromValues(values: CalibrationValues): Bounds {
+                return Bounds(
+                    left = min(values.topLeftX, values.bottomRightX),
+                    top = min(values.topLeftY, values.bottomRightY),
+                    right = max(values.topLeftX, values.bottomRightX),
+                    bottom = max(values.topLeftY, values.bottomRightY)
+                )
+            }
+
+            fun fromLegacy(topLeft: Pair<Float, Float>, bottomRight: Pair<Float, Float>): Bounds {
+                return Bounds(
+                    left = min(topLeft.first, bottomRight.first),
+                    top = min(topLeft.second, bottomRight.second),
+                    right = max(topLeft.first, bottomRight.first),
+                    bottom = max(topLeft.second, bottomRight.second)
+                )
+            }
+        }
+    }
 }

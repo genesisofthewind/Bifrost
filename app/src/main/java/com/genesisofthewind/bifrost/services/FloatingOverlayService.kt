@@ -160,6 +160,12 @@ class FloatingOverlayService : Service() {
                     ?: BifrostDebug.record("Accessibility service is not connected")
             })
 
+            addView(menuButton("Run Known-Good Square") {
+                BifrostDebug.record("Overlay known-good square tapped")
+                DrawAccessibilityService.getInstance()?.executeCommand(ShapeCommand.CalibratedSmallSquare)
+                    ?: BifrostDebug.record("Accessibility service is not connected")
+            })
+
             addView(menuButton("Run Calibrated Test Diagonal") {
                 BifrostDebug.record("Overlay calibrated diagonal tapped")
                 DrawAccessibilityService.getInstance()?.executeCommand(ShapeCommand.CalibratedDiagonal)

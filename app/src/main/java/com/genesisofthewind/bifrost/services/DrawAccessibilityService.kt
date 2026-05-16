@@ -3,16 +3,21 @@ package com.genesisofthewind.bifrost.services
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.content.Intent
+import android.graphics.Path
+import android.os.Handler
+import android.os.Looper
 import android.view.accessibility.AccessibilityEvent
 import com.genesisofthewind.bifrost.BifrostDebug
 import com.genesisofthewind.bifrost.data.CalibrationStore
 import com.genesisofthewind.bifrost.engine.DrawEngine
-import com.genesisofthewind.bifrost.engine.GestureStep
 import com.genesisofthewind.bifrost.engine.ShapeCommand
+import com.genesisofthewind.bifrost.engine.StrokePlan
+import com.genesisofthewind.bifrost.engine.StrokeSpec
 
 class DrawAccessibilityService : AccessibilityService() {
 
     private lateinit var drawEngine: DrawEngine
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     companion object {
         private var instance: DrawAccessibilityService? = null
@@ -50,37 +55,51 @@ class DrawAccessibilityService : AccessibilityService() {
     fun executeCommand(command: ShapeCommand) {
         val commandName = command.javaClass.simpleName
         BifrostDebug.record("Selected command: $commandName")
-        val steps = drawEngine.createGestureStepsForCommand(command)
-        if (steps.isEmpty()) {
+        val plan = drawEngine.createStrokePlanForCommand(command)
+        BifrostDebug.setStrokePreview(plan.debugLines)
+        plan.debugLines.forEach { BifrostDebug.record(it) }
+        if (plan.strokes.isEmpty()) {
             BifrostDebug.record("Gesture action stopped")
             return
         }
 
-        dispatchStep(commandName, steps, 0)
+        dispatchStroke(plan, 0)
     }
 
-    private fun dispatchStep(commandName: String, steps: List<GestureStep>, index: Int) {
-        val step = steps[index]
-        BifrostDebug.record("Dispatching ${step.name}: ${step.coordinates}")
-        val dispatched = dispatchGesture(step.gesture, object : GestureResultCallback() {
+    private fun dispatchStroke(plan: StrokePlan, index: Int) {
+        val stroke = plan.strokes[index]
+        BifrostDebug.record("Dispatching ${plan.commandName} stroke ${index + 1}/${plan.strokes.size}: ${stroke.describe(index + 1)}")
+        val dispatched = dispatchGesture(createGesture(stroke), object : GestureResultCallback() {
             override fun onCompleted(gestureDescription: GestureDescription) {
                 super.onCompleted(gestureDescription)
-                BifrostDebug.record("Gesture completed: ${step.name}")
+                BifrostDebug.record("Gesture completed: ${plan.commandName} stroke ${index + 1}/${plan.strokes.size}")
                 val nextIndex = index + 1
-                if (nextIndex < steps.size) {
-                    BifrostDebug.record("Queueing next $commandName stroke: ${nextIndex + 1}/${steps.size}")
-                    dispatchStep(commandName, steps, nextIndex)
+                if (nextIndex < plan.strokes.size) {
+                    BifrostDebug.record("Waiting ${stroke.delayAfterMs}ms before next stroke")
+                    mainHandler.postDelayed({
+                        dispatchStroke(plan, nextIndex)
+                    }, stroke.delayAfterMs)
                 }
             }
 
             override fun onCancelled(gestureDescription: GestureDescription) {
                 super.onCancelled(gestureDescription)
-                BifrostDebug.record("Gesture cancelled: ${step.name}")
+                BifrostDebug.record("Gesture cancelled: ${plan.commandName} stroke ${index + 1}/${plan.strokes.size}")
             }
         }, null)
         if (!dispatched) {
-            BifrostDebug.record("Gesture dispatch failed: ${step.name}")
+            BifrostDebug.record("Gesture dispatch failed: ${plan.commandName} stroke ${index + 1}/${plan.strokes.size}")
         }
+    }
+
+    private fun createGesture(stroke: StrokeSpec): GestureDescription {
+        val path = Path().apply {
+            moveTo(stroke.startX, stroke.startY)
+            lineTo(stroke.endX, stroke.endY)
+        }
+        return GestureDescription.Builder()
+            .addStroke(GestureDescription.StrokeDescription(path, 0L, stroke.durationMs.coerceAtLeast(50L)))
+            .build()
     }
 
     override fun onDestroy() {

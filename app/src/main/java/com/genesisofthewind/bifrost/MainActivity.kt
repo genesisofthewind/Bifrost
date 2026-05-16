@@ -298,6 +298,10 @@ fun TestShapesSection(
             saveForTest("Test small square requested")
             onRunCommand(ShapeCommand.CalibratedSmallSquare)
         })
+        FullWidthButton("Run Known-Good Square", onClick = {
+            saveForTest("Known-good square requested")
+            onRunCommand(ShapeCommand.CalibratedSmallSquare)
+        })
         FullWidthButton("Test X Shape", onClick = {
             saveForTest("Test X shape requested")
             onRunCommand(ShapeCommand.CalibratedXShape)
@@ -309,6 +313,11 @@ fun TestShapesSection(
 fun DebugSection(onRefreshStatus: () -> Unit) {
     Section("Debug") {
         FullWidthButton("Refresh Debug Info", onRefreshStatus)
+        Text("Debug Stroke Preview", color = TextSecondary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+        BifrostDebug.strokePreview.forEach { line ->
+            DebugLine(line)
+        }
+        Spacer(modifier = Modifier.height(8.dp))
         Text("Display Info", color = TextSecondary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
         BifrostDebug.displayInfo.forEach { line ->
             DebugLine(line)

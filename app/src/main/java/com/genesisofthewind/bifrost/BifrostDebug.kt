@@ -23,6 +23,7 @@ object BifrostDebug {
     val overlayPermissionGranted = mutableStateOf(false)
     val overlayRunning = mutableStateOf(false)
     val displayInfo = mutableStateListOf("Display info not refreshed yet")
+    val strokePreview = mutableStateListOf("No stroke preview yet")
 
     fun record(message: String) {
         Log.d(TAG, message)
@@ -52,6 +53,11 @@ object BifrostDebug {
     fun setOverlayRunning(isRunning: Boolean) {
         overlayRunning.value = isRunning
         record("Overlay running: $isRunning")
+    }
+
+    fun setStrokePreview(lines: List<String>) {
+        strokePreview.clear()
+        strokePreview.addAll(lines.ifEmpty { listOf("No strokes generated") })
     }
 
     fun refreshDisplayInfo(context: Context) {
