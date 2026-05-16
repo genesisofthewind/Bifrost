@@ -12,10 +12,15 @@ data class StrokeSpec(
     val endX: Float,
     val endY: Float,
     val durationMs: Long,
-    val delayAfterMs: Long = 140L
+    val delayAfterMs: Long = 140L,
+    val directionLabel: String = "custom",
+    val segmented: Boolean = false,
+    val segmentIndex: Int = 1,
+    val segmentCount: Int = 1
 ) {
     fun describe(index: Int): String {
-        return "stroke $index: $startX,$startY -> $endX,$endY duration=$durationMs delayAfter=$delayAfterMs"
+        val mode = if (segmented) "segmented" else "normal"
+        return "stroke $index: $mode $directionLabel segment=$segmentIndex/$segmentCount $startX,$startY -> $endX,$endY duration=$durationMs delayAfter=$delayAfterMs"
     }
 }
 
@@ -69,6 +74,12 @@ class DrawEngine(private val calibrationStore: CalibrationStore) {
             is ShapeCommand.SegmentedDiagonal -> {
                 segmentedDiagonal(Bounds.fromValues(values).inset(), DiagonalDirection.TopLeftToBottomRight, values.durationMs.coerceAtLeast(600L), 8)
             }
+            is ShapeCommand.SegmentedTopLeftToBottomRight -> {
+                segmentedDiagonal(Bounds.fromValues(values).inset(), DiagonalDirection.TopLeftToBottomRight, values.durationMs.coerceAtLeast(720L), 10)
+            }
+            is ShapeCommand.SegmentedTopRightToBottomLeft -> {
+                segmentedDiagonal(Bounds.fromValues(values).inset(), DiagonalDirection.TopRightToBottomLeft, values.durationMs.coerceAtLeast(720L), 10)
+            }
             is ShapeCommand.CalibratedSmallSquare -> {
                 val inset = Bounds.fromValues(values).inset()
                 val size = min(inset.width, inset.height) * 0.2f
@@ -87,16 +98,20 @@ class DrawEngine(private val calibrationStore: CalibrationStore) {
             is ShapeCommand.CalibratedXShape -> {
                 val inset = Bounds.fromValues(values).inset()
                 val duration = values.durationMs.coerceAtLeast(400L)
-                listOf(
-                    diagonalStroke(inset, DiagonalDirection.TopLeftToBottomRight, duration, 260L).first(),
-                    diagonalStroke(inset, DiagonalDirection.TopRightToBottomLeft, duration, 0L).first()
-                )
+                diagonalStroke(inset, DiagonalDirection.TopRightToBottomLeft, duration, 260L) +
+                    segmentedDiagonal(inset, DiagonalDirection.TopLeftToBottomRight, duration.coerceAtLeast(720L), 10)
+            }
+            is ShapeCommand.ReverseXShape -> {
+                val inset = Bounds.fromValues(values).inset()
+                val duration = values.durationMs.coerceAtLeast(400L)
+                segmentedDiagonal(inset, DiagonalDirection.TopLeftToBottomRight, duration.coerceAtLeast(720L), 10, finalDelayAfterMs = 260L) +
+                    diagonalStroke(inset, DiagonalDirection.TopRightToBottomLeft, duration, 0L)
             }
             is ShapeCommand.SegmentedXShape -> {
                 val inset = Bounds.fromValues(values).inset()
                 val duration = values.durationMs.coerceAtLeast(600L)
-                segmentedDiagonal(inset, DiagonalDirection.TopLeftToBottomRight, duration, 8, finalDelayAfterMs = 260L) +
-                    segmentedDiagonal(inset, DiagonalDirection.TopRightToBottomLeft, duration, 8)
+                segmentedDiagonal(inset, DiagonalDirection.TopLeftToBottomRight, duration, 10, finalDelayAfterMs = 260L) +
+                    segmentedDiagonal(inset, DiagonalDirection.TopRightToBottomLeft, duration, 10)
             }
             is ShapeCommand.TestLine -> {
                 val bounds = Bounds.fromLegacy(legacyTopLeft, legacyBottomRight)
@@ -134,7 +149,7 @@ class DrawEngine(private val calibrationStore: CalibrationStore) {
         delayAfterMs: Long
     ): List<StrokeSpec> {
         val (start, end) = direction.points(bounds)
-        return listOf(StrokeSpec(start.first, start.second, end.first, end.second, durationMs, delayAfterMs))
+        return listOf(StrokeSpec(start.first, start.second, end.first, end.second, durationMs, delayAfterMs, direction.label, false, 1, 1))
     }
 
     private fun segmentedDiagonal(
@@ -157,7 +172,11 @@ class DrawEngine(private val calibrationStore: CalibrationStore) {
                 endX = lerp(start.first, end.first, toT),
                 endY = lerp(start.second, end.second, toT),
                 durationMs = duration,
-                delayAfterMs = delay
+                delayAfterMs = delay,
+                directionLabel = direction.label,
+                segmented = true,
+                segmentIndex = index + 1,
+                segmentCount = safeSegmentCount
             )
         }
     }
@@ -171,6 +190,14 @@ class DrawEngine(private val calibrationStore: CalibrationStore) {
         TopRightToBottomLeft,
         BottomLeftToTopRight,
         BottomRightToTopLeft;
+
+        val label: String
+            get() = when (this) {
+                TopLeftToBottomRight -> "TopLeft to BottomRight"
+                TopRightToBottomLeft -> "TopRight to BottomLeft"
+                BottomLeftToTopRight -> "BottomLeft to TopRight"
+                BottomRightToTopLeft -> "BottomRight to TopLeft"
+            }
 
         fun points(bounds: Bounds): Pair<Pair<Float, Float>, Pair<Float, Float>> {
             return when (this) {

@@ -179,14 +179,14 @@ class FloatingOverlayService : Service() {
                 })
 
                 addView(sectionLabel("Debug"))
-                addView(menuButton("Segmented Diagonal") {
-                    BifrostDebug.record("Overlay segmented diagonal tapped")
-                    executeOverlayCommand(ShapeCommand.SegmentedDiagonal)
+                addView(menuButton("Segmented TL->BR") {
+                    BifrostDebug.record("Overlay segmented TL->BR tapped")
+                    executeOverlayCommand(ShapeCommand.SegmentedTopLeftToBottomRight)
                 })
 
-                addView(menuButton("Segmented X") {
-                    BifrostDebug.record("Overlay segmented X tapped")
-                    executeOverlayCommand(ShapeCommand.SegmentedXShape)
+                addView(menuButton("Reverse X") {
+                    BifrostDebug.record("Overlay reverse X tapped")
+                    executeOverlayCommand(ShapeCommand.ReverseXShape)
                 })
 
                 addView(menuButton("Pause/Stop Action") {
