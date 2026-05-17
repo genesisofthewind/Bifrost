@@ -41,9 +41,11 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -197,7 +199,21 @@ fun MainScreen(
     onCancelDrawing: () -> Unit
 ) {
     var selectedTab by remember { mutableStateOf(0) }
+    var savedImageUri by rememberSaveable { mutableStateOf<String?>(null) }
+    val imageTraceState = remember { ImageTraceUiState() }
+    val context = LocalContext.current
     val tabs = listOf("Status", "Overlay", "Calibration", "Test Shapes", "Image", "Debug")
+
+    LaunchedEffect(savedImageUri) {
+        val uriText = savedImageUri
+        if (uriText != null && imageTraceState.sourceBitmap == null) {
+            decodeBitmapFromUri(context, uriText)?.let { bitmap ->
+                imageTraceState.sourceBitmap = bitmap
+                imageTraceState.sourceUriText = uriText
+                BifrostDebug.record("Image restored: ${bitmap.width}x${bitmap.height}")
+            } ?: BifrostDebug.record("Image restore failed")
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -234,10 +250,24 @@ fun MainScreen(
             1 -> OverlaySection(onStartOverlay, onStopOverlay, onStartCanvasSelector, onStopCanvasSelector)
             2 -> CalibrationSection(calibrationStore)
             3 -> TestShapesSection(calibrationStore, onRunCommand)
-            4 -> ImageImportSection(calibrationStore, onRunTracePlan, onCancelDrawing)
+            4 -> ImageImportSection(
+                calibrationStore = calibrationStore,
+                imageState = imageTraceState,
+                onImageUriChanged = { savedImageUri = it },
+                onRunTracePlan = onRunTracePlan,
+                onCancelDrawing = onCancelDrawing
+            )
             5 -> DebugSection(onRefreshStatus)
         }
     }
+}
+
+fun decodeBitmapFromUri(context: android.content.Context, uriText: String): Bitmap? {
+    return runCatching {
+        context.contentResolver.openInputStream(Uri.parse(uriText))?.use { stream ->
+            BitmapFactory.decodeStream(stream)
+        }
+    }.getOrNull()
 }
 
 @Composable
@@ -405,75 +435,94 @@ fun TestShapesSection(
     }
 }
 
+class ImageTraceUiState {
+    var sourceBitmap by mutableStateOf<Bitmap?>(null)
+    var sourceUriText by mutableStateOf<String?>(null)
+    var processedBitmap by mutableStateOf<Bitmap?>(null)
+    var traceMode by mutableStateOf(TraceMode.CartoonFillReady)
+    var selectedPreset by mutableStateOf(TracePresets.TomodachiCartoon)
+    var threshold by mutableStateOf(142f)
+    var invert by mutableStateOf(false)
+    var rowStepText by mutableStateOf("1")
+    var minRunLengthText by mutableStateOf("2")
+    var maxStrokesText by mutableStateOf("1800")
+    var strokeDurationText by mutableStateOf("35")
+    var delayBetweenStrokesText by mutableStateOf("25")
+    var edgeSensitivityText by mutableStateOf("45")
+    var tracePlan by mutableStateOf<StrokePlan?>(null)
+    var warning by mutableStateOf<String?>(null)
+
+    fun clearImage() {
+        sourceBitmap = null
+        sourceUriText = null
+        processedBitmap = null
+        tracePlan = null
+        warning = null
+    }
+}
+
 @Composable
 fun ImageImportSection(
     calibrationStore: CalibrationStore,
+    imageState: ImageTraceUiState,
+    onImageUriChanged: (String?) -> Unit,
     onRunTracePlan: (StrokePlan) -> Unit,
     onCancelDrawing: () -> Unit
 ) {
     val context = LocalContext.current
     val traceEngine = remember { ImageTraceEngine(calibrationStore) }
-    var sourceBitmap by remember { mutableStateOf<Bitmap?>(null) }
-    var processedBitmap by remember { mutableStateOf<Bitmap?>(null) }
-    var traceMode by remember { mutableStateOf(TraceMode.BalancedHybrid) }
-    var selectedPreset by remember { mutableStateOf(TracePresets.Balanced) }
-    var threshold by remember { mutableStateOf(140f) }
-    var invert by remember { mutableStateOf(false) }
-    var rowStepText by remember { mutableStateOf("2") }
-    var minRunLengthText by remember { mutableStateOf("3") }
-    var maxStrokesText by remember { mutableStateOf("1200") }
-    var strokeDurationText by remember { mutableStateOf("35") }
-    var delayBetweenStrokesText by remember { mutableStateOf("30") }
-    var tracePlan by remember { mutableStateOf<StrokePlan?>(null) }
-    var warning by remember { mutableStateOf<String?>(null) }
 
-    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) {
             BifrostDebug.record("Image import cancelled")
             return@rememberLauncherForActivityResult
         }
-        val bitmap = context.contentResolver.openInputStream(uri)?.use { stream ->
-            BitmapFactory.decodeStream(stream)
+        runCatching {
+            context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
+        val bitmap = decodeBitmapFromUri(context, uri.toString())
         if (bitmap == null) {
             BifrostDebug.record("Image import failed")
         } else {
-            sourceBitmap = bitmap
-            processedBitmap = null
-            tracePlan = null
-            warning = null
+            imageState.sourceBitmap = bitmap
+            imageState.sourceUriText = uri.toString()
+            imageState.processedBitmap = null
+            imageState.tracePlan = null
+            imageState.warning = null
+            onImageUriChanged(uri.toString())
             BifrostDebug.record("Image imported: ${bitmap.width}x${bitmap.height}")
         }
     }
 
     fun currentTraceSettings(): TraceSettings {
         return TraceSettings(
-            mode = traceMode,
-            threshold = threshold.toInt(),
-            invert = invert,
-            rowStep = rowStepText.toIntOrNull()?.coerceIn(1, 16) ?: 4,
-            minRunLength = minRunLengthText.toIntOrNull()?.coerceIn(1, 64) ?: 3,
-            maxStrokes = maxStrokesText.toIntOrNull()?.coerceIn(20, 3000) ?: 650,
-            strokeDurationMs = strokeDurationText.toLongOrNull()?.coerceIn(15L, 1200L) ?: 70L,
-            delayBetweenStrokesMs = delayBetweenStrokesText.toLongOrNull()?.coerceIn(0L, 500L) ?: 45L
+            mode = imageState.traceMode,
+            threshold = imageState.threshold.toInt(),
+            invert = imageState.invert,
+            rowStep = imageState.rowStepText.toIntOrNull()?.coerceIn(1, 16) ?: 4,
+            minRunLength = imageState.minRunLengthText.toIntOrNull()?.coerceIn(1, 64) ?: 3,
+            maxStrokes = imageState.maxStrokesText.toIntOrNull()?.coerceIn(20, 3000) ?: 650,
+            strokeDurationMs = imageState.strokeDurationText.toLongOrNull()?.coerceIn(15L, 1200L) ?: 70L,
+            delayBetweenStrokesMs = imageState.delayBetweenStrokesText.toLongOrNull()?.coerceIn(0L, 500L) ?: 45L,
+            edgeSensitivity = imageState.edgeSensitivityText.toIntOrNull()?.coerceIn(1, 100) ?: 55
         )
     }
 
     fun markCustom() {
-        selectedPreset = TracePresets.Custom
-        tracePlan = null
+        imageState.selectedPreset = TracePresets.Custom
+        imageState.tracePlan = null
     }
 
     fun generateTrace(settings: TraceSettings = currentTraceSettings()): StrokePlan? {
-        val bitmap = sourceBitmap
+        val bitmap = imageState.sourceBitmap
         if (bitmap == null) {
             BifrostDebug.record("Generate trace skipped: no image selected")
             return null
         }
         val result = traceEngine.createTracePlan(bitmap, settings)
-        processedBitmap = result.processedBitmap
-        tracePlan = result.strokePlan
-        warning = result.warning
+        imageState.processedBitmap = result.processedBitmap
+        imageState.tracePlan = result.strokePlan
+        imageState.warning = result.warning
         BifrostDebug.setStrokePreview(result.strokePlan.debugLines)
         result.strokePlan.debugLines.forEach { BifrostDebug.record(it) }
         result.warning?.let { BifrostDebug.record(it) }
@@ -481,68 +530,84 @@ fun ImageImportSection(
     }
 
     fun applyPreset(preset: TracePreset) {
-        selectedPreset = preset
+        imageState.selectedPreset = preset
         val settings = preset.settings ?: return
-        traceMode = settings.mode
-        threshold = settings.threshold.toFloat()
-        invert = settings.invert
-        rowStepText = settings.rowStep.toString()
-        minRunLengthText = settings.minRunLength.toString()
-        maxStrokesText = settings.maxStrokes.toString()
-        strokeDurationText = settings.strokeDurationMs.toString()
-        delayBetweenStrokesText = settings.delayBetweenStrokesMs.toString()
-        tracePlan = null
-        processedBitmap = null
-        warning = null
+        imageState.traceMode = settings.mode
+        imageState.threshold = settings.threshold.toFloat()
+        imageState.invert = settings.invert
+        imageState.rowStepText = settings.rowStep.toString()
+        imageState.minRunLengthText = settings.minRunLength.toString()
+        imageState.maxStrokesText = settings.maxStrokes.toString()
+        imageState.strokeDurationText = settings.strokeDurationMs.toString()
+        imageState.delayBetweenStrokesText = settings.delayBetweenStrokesMs.toString()
+        imageState.edgeSensitivityText = settings.edgeSensitivity.toString()
+        imageState.tracePlan = null
+        imageState.processedBitmap = null
+        imageState.warning = null
         BifrostDebug.record("Trace preset applied: ${preset.name}")
-        if (sourceBitmap != null) {
+        if (imageState.sourceBitmap != null) {
             generateTrace(settings)
         }
     }
 
     Section("Image Import") {
-        FullWidthButton("Pick Image", onClick = { imagePicker.launch("image/*") })
-        sourceBitmap?.let { bitmap ->
+        FullWidthButton("Pick Image", onClick = { imagePicker.launch(arrayOf("image/*")) })
+        imageState.sourceBitmap?.let { bitmap ->
             Text("Selected image: ${bitmap.width} x ${bitmap.height}", color = TextSecondary, fontSize = 13.sp)
             ImagePreview("Original Preview", bitmap)
-        } ?: Text("No image selected", color = TextMuted, fontSize = 13.sp)
+            FullWidthButton("Clear Image", onClick = {
+                imageState.clearImage()
+                onImageUriChanged(null)
+                BifrostDebug.record("Imported image cleared")
+            }, danger = true)
+        } ?: Text("No image loaded. Pick an image to generate a trace.", color = TextMuted, fontSize = 13.sp)
     }
 
     Spacer(modifier = Modifier.height(12.dp))
 
     Section("Black / White Trace") {
-        Text("Preset: ${selectedPreset.name}", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-        Text(selectedPreset.description, color = TextMuted, fontSize = 12.sp)
-        TracePresetSelector(selectedPreset, onPresetSelected = { applyPreset(it) })
-        selectedPreset.settings?.let { settings ->
+        Text("Preset: ${imageState.selectedPreset.name}", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        Text(imageState.selectedPreset.description, color = TextMuted, fontSize = 12.sp)
+        TracePresetSelector(imageState.selectedPreset, onPresetSelected = { applyPreset(it) })
+        imageState.selectedPreset.settings?.let { settings ->
             TracePresetValues(settings)
         }
-        Text("Trace Mode: ${traceMode.label}", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        Text("Trace Mode: ${imageState.traceMode.label}", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
         FullWidthButton("Fill Trace / Scanline Trace", onClick = {
-            traceMode = TraceMode.FillScanline
+            imageState.traceMode = TraceMode.FillScanline
             markCustom()
-            processedBitmap = null
+            imageState.processedBitmap = null
         })
         FullWidthButton("Outline Trace", onClick = {
-            traceMode = TraceMode.Outline
+            imageState.traceMode = TraceMode.Outline
             markCustom()
-            processedBitmap = null
+            imageState.processedBitmap = null
         })
         FullWidthButton("Sparse Sketch Trace", onClick = {
-            traceMode = TraceMode.SparseSketch
+            imageState.traceMode = TraceMode.SparseSketch
             markCustom()
-            processedBitmap = null
+            imageState.processedBitmap = null
         })
         FullWidthButton("Balanced / Hybrid", onClick = {
-            traceMode = TraceMode.BalancedHybrid
+            imageState.traceMode = TraceMode.BalancedHybrid
             markCustom()
-            processedBitmap = null
+            imageState.processedBitmap = null
         })
-        Text("Threshold: ${threshold.toInt()}", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        FullWidthButton("Cartoon Fill Ready", onClick = {
+            imageState.traceMode = TraceMode.CartoonFillReady
+            markCustom()
+            imageState.processedBitmap = null
+        })
+        FullWidthButton("Character Detail", onClick = {
+            imageState.traceMode = TraceMode.CharacterDetail
+            markCustom()
+            imageState.processedBitmap = null
+        })
+        Text("Threshold: ${imageState.threshold.toInt()}", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
         Slider(
-            value = threshold,
+            value = imageState.threshold,
             onValueChange = {
-                threshold = it
+                imageState.threshold = it
                 markCustom()
             },
             valueRange = 0f..255f
@@ -554,50 +619,58 @@ fun ImageImportSection(
         ) {
             Text("Invert", color = TextPrimary, fontSize = 14.sp)
             Switch(
-                checked = invert,
+                checked = imageState.invert,
                 onCheckedChange = {
-                    invert = it
+                    imageState.invert = it
                     markCustom()
                 }
             )
         }
-        CoordinateField("Row step / detail", rowStepText, {
-            rowStepText = it
+        CoordinateField("Row step / detail", imageState.rowStepText, {
+            imageState.rowStepText = it
             markCustom()
         }, {
-            rowStepText = nudgeText(rowStepText, it).toIntOrNull()?.coerceIn(1, 16)?.toString() ?: "4"
+            imageState.rowStepText = nudgeText(imageState.rowStepText, it).toIntOrNull()?.coerceIn(1, 16)?.toString() ?: "4"
             markCustom()
         })
         Text("Lower row step = more detail. Higher row step = fewer strokes.", color = TextMuted, fontSize = 12.sp)
-        CoordinateField("Minimum run length", minRunLengthText, {
-            minRunLengthText = it
+        CoordinateField("Minimum run length", imageState.minRunLengthText, {
+            imageState.minRunLengthText = it
             markCustom()
         }, {
-            minRunLengthText = nudgeText(minRunLengthText, it).toIntOrNull()?.coerceIn(1, 64)?.toString() ?: "3"
+            imageState.minRunLengthText = nudgeText(imageState.minRunLengthText, it).toIntOrNull()?.coerceIn(1, 64)?.toString() ?: "3"
             markCustom()
         })
-        CoordinateField("Max strokes limit", maxStrokesText, {
-            maxStrokesText = it
+        CoordinateField("Edge sensitivity", imageState.edgeSensitivityText, {
+            imageState.edgeSensitivityText = it
             markCustom()
         }, {
-            maxStrokesText = nudgeText(maxStrokesText, it * 50).toIntOrNull()?.coerceIn(20, 3000)?.toString() ?: "650"
+            imageState.edgeSensitivityText = nudgeText(imageState.edgeSensitivityText, it * 5).toIntOrNull()?.coerceIn(1, 100)?.toString() ?: "55"
             markCustom()
         })
-        CoordinateField("Stroke duration ms", strokeDurationText, {
-            strokeDurationText = it
+        Text("Higher edge sensitivity preserves more interior color/brightness boundaries.", color = TextMuted, fontSize = 12.sp)
+        CoordinateField("Max strokes limit", imageState.maxStrokesText, {
+            imageState.maxStrokesText = it
             markCustom()
         }, {
-            strokeDurationText = nudgeText(strokeDurationText, it * 10).toIntOrNull()?.coerceIn(15, 1200)?.toString() ?: "70"
+            imageState.maxStrokesText = nudgeText(imageState.maxStrokesText, it * 50).toIntOrNull()?.coerceIn(20, 3000)?.toString() ?: "650"
             markCustom()
         })
-        CoordinateField("Delay between strokes ms", delayBetweenStrokesText, {
-            delayBetweenStrokesText = it
+        CoordinateField("Stroke duration ms", imageState.strokeDurationText, {
+            imageState.strokeDurationText = it
             markCustom()
         }, {
-            delayBetweenStrokesText = nudgeText(delayBetweenStrokesText, it * 10).toIntOrNull()?.coerceIn(0, 500)?.toString() ?: "45"
+            imageState.strokeDurationText = nudgeText(imageState.strokeDurationText, it * 10).toIntOrNull()?.coerceIn(15, 1200)?.toString() ?: "70"
             markCustom()
         })
-        processedBitmap?.let { bitmap ->
+        CoordinateField("Delay between strokes ms", imageState.delayBetweenStrokesText, {
+            imageState.delayBetweenStrokesText = it
+            markCustom()
+        }, {
+            imageState.delayBetweenStrokesText = nudgeText(imageState.delayBetweenStrokesText, it * 10).toIntOrNull()?.coerceIn(0, 500)?.toString() ?: "45"
+            markCustom()
+        })
+        imageState.processedBitmap?.let { bitmap ->
             ImagePreview("Processed Preview", bitmap)
         }
     }
@@ -608,7 +681,7 @@ fun ImageImportSection(
         FullWidthButton("Generate Trace", onClick = { generateTrace() })
         FullWidthButton("Preview Trace Summary", onClick = { generateTrace() })
         FullWidthButton("Draw Imported Image", onClick = {
-            val plan = tracePlan ?: generateTrace()
+            val plan = imageState.tracePlan ?: generateTrace()
             if (plan == null) {
                 BifrostDebug.record("Draw imported image skipped: no trace plan")
             } else if (plan.strokes.isEmpty()) {
@@ -619,12 +692,15 @@ fun ImageImportSection(
             }
         })
         FullWidthButton("Cancel Current Drawing", onCancelDrawing, danger = true)
-        tracePlan?.let { plan ->
+        if (imageState.sourceBitmap == null) {
+            Text("No image loaded yet. Pick an image before generating or drawing a trace.", color = TextMuted, fontSize = 13.sp)
+        }
+        imageState.tracePlan?.let { plan ->
             Text("Trace Summary", color = TextSecondary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-            TraceSummary(plan, traceMode)
+            TraceSummary(plan, imageState.traceMode)
             plan.debugLines.forEach { line -> DebugLine(line) }
         }
-        warning?.let { line ->
+        imageState.warning?.let { line ->
             Text(line, color = RedAccent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
         }
     }
@@ -662,7 +738,7 @@ fun TracePresetSelector(
 fun TracePresetValues(settings: TraceSettings) {
     DebugLine(
         "sets: ${settings.mode.label}, threshold=${settings.threshold}, rowStep=${settings.rowStep}, " +
-            "minRun=${settings.minRunLength}, max=${settings.maxStrokes}, " +
+            "minRun=${settings.minRunLength}, edge=${settings.edgeSensitivity}, max=${settings.maxStrokes}, " +
             "duration=${settings.strokeDurationMs}ms, delay=${settings.delayBetweenStrokesMs}ms"
     )
 }
