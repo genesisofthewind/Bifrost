@@ -60,6 +60,7 @@ import com.genesisofthewind.bifrost.data.CalibrationValues
 import com.genesisofthewind.bifrost.engine.ImageTraceEngine
 import com.genesisofthewind.bifrost.engine.ShapeCommand
 import com.genesisofthewind.bifrost.engine.StrokePlan
+import com.genesisofthewind.bifrost.engine.TraceMode
 import com.genesisofthewind.bifrost.engine.TraceSettings
 import com.genesisofthewind.bifrost.services.CanvasSelectorOverlayService
 import com.genesisofthewind.bifrost.services.DrawAccessibilityService
@@ -412,9 +413,14 @@ fun ImageImportSection(
     val traceEngine = remember { ImageTraceEngine(calibrationStore) }
     var sourceBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var processedBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var traceMode by remember { mutableStateOf(TraceMode.FillScanline) }
     var threshold by remember { mutableStateOf(128f) }
     var invert by remember { mutableStateOf(false) }
     var rowStepText by remember { mutableStateOf("4") }
+    var minRunLengthText by remember { mutableStateOf("3") }
+    var maxStrokesText by remember { mutableStateOf("650") }
+    var strokeDurationText by remember { mutableStateOf("70") }
+    var delayBetweenStrokesText by remember { mutableStateOf("45") }
     var tracePlan by remember { mutableStateOf<StrokePlan?>(null) }
     var warning by remember { mutableStateOf<String?>(null) }
 
@@ -444,9 +450,14 @@ fun ImageImportSection(
             return null
         }
         val settings = TraceSettings(
+            mode = traceMode,
             threshold = threshold.toInt(),
             invert = invert,
-            rowStep = rowStepText.toIntOrNull()?.coerceIn(1, 16) ?: 4
+            rowStep = rowStepText.toIntOrNull()?.coerceIn(1, 16) ?: 4,
+            minRunLength = minRunLengthText.toIntOrNull()?.coerceIn(1, 64) ?: 3,
+            maxStrokes = maxStrokesText.toIntOrNull()?.coerceIn(20, 3000) ?: 650,
+            strokeDurationMs = strokeDurationText.toLongOrNull()?.coerceIn(40L, 1200L) ?: 70L,
+            delayBetweenStrokesMs = delayBetweenStrokesText.toLongOrNull()?.coerceIn(0L, 500L) ?: 45L
         )
         val result = traceEngine.createTracePlan(bitmap, settings)
         processedBitmap = result.processedBitmap
@@ -469,6 +480,22 @@ fun ImageImportSection(
     Spacer(modifier = Modifier.height(12.dp))
 
     Section("Black / White Trace") {
+        Text("Trace Mode: ${traceMode.label}", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        FullWidthButton("Fill Trace / Scanline Trace", onClick = {
+            traceMode = TraceMode.FillScanline
+            tracePlan = null
+            processedBitmap = null
+        })
+        FullWidthButton("Outline Trace", onClick = {
+            traceMode = TraceMode.Outline
+            tracePlan = null
+            processedBitmap = null
+        })
+        FullWidthButton("Sparse Sketch Trace", onClick = {
+            traceMode = TraceMode.SparseSketch
+            tracePlan = null
+            processedBitmap = null
+        })
         Text("Threshold: ${threshold.toInt()}", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
         Slider(
             value = threshold,
@@ -500,6 +527,34 @@ fun ImageImportSection(
             tracePlan = null
         })
         Text("Lower row step = more detail. Higher row step = fewer strokes.", color = TextMuted, fontSize = 12.sp)
+        CoordinateField("Minimum run length", minRunLengthText, {
+            minRunLengthText = it
+            tracePlan = null
+        }, {
+            minRunLengthText = nudgeText(minRunLengthText, it).toIntOrNull()?.coerceIn(1, 64)?.toString() ?: "3"
+            tracePlan = null
+        })
+        CoordinateField("Max strokes limit", maxStrokesText, {
+            maxStrokesText = it
+            tracePlan = null
+        }, {
+            maxStrokesText = nudgeText(maxStrokesText, it * 50).toIntOrNull()?.coerceIn(20, 3000)?.toString() ?: "650"
+            tracePlan = null
+        })
+        CoordinateField("Stroke duration ms", strokeDurationText, {
+            strokeDurationText = it
+            tracePlan = null
+        }, {
+            strokeDurationText = nudgeText(strokeDurationText, it * 10).toIntOrNull()?.coerceIn(40, 1200)?.toString() ?: "70"
+            tracePlan = null
+        })
+        CoordinateField("Delay between strokes ms", delayBetweenStrokesText, {
+            delayBetweenStrokesText = it
+            tracePlan = null
+        }, {
+            delayBetweenStrokesText = nudgeText(delayBetweenStrokesText, it * 10).toIntOrNull()?.coerceIn(0, 500)?.toString() ?: "45"
+            tracePlan = null
+        })
         processedBitmap?.let { bitmap ->
             ImagePreview("Processed Preview", bitmap)
         }
@@ -524,12 +579,21 @@ fun ImageImportSection(
         FullWidthButton("Cancel Current Drawing", onCancelDrawing, danger = true)
         tracePlan?.let { plan ->
             Text("Trace Summary", color = TextSecondary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            TraceSummary(plan, traceMode)
             plan.debugLines.forEach { line -> DebugLine(line) }
         }
         warning?.let { line ->
             Text(line, color = RedAccent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
         }
     }
+}
+
+@Composable
+fun TraceSummary(plan: StrokePlan, traceMode: TraceMode) {
+    val estimatedMs = plan.strokes.sumOf { it.durationMs + it.delayAfterMs }
+    DebugLine("trace mode: ${traceMode.label}")
+    DebugLine("stroke count: ${plan.strokes.size}")
+    DebugLine("estimated draw time: ${estimatedMs / 1000f}s")
 }
 
 @Composable
