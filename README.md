@@ -27,6 +27,17 @@ Debug APK output:
 app/build/outputs/apk/debug/app-debug.apk
 ```
 
+## Tomodachi Life Quick Start
+
+1. Install the debug APK on the AYN Thor.
+2. Open *Tomodachi Life: Living the Dream* and enter the drawing screen.
+3. In Bifrost, open the selector overlay and position it over the usable drawing area.
+4. Load an image in the Image tab.
+5. Choose a trace preset.
+6. Generate the trace and review the summary.
+7. Start drawing with **Draw Imported Image**.
+8. After drawing finishes, manually clean up small gaps or use bucket fill in Tomodachi Life as needed.
+
 ## Current Features
 
 - Compact Jetpack Compose control UI for the Thor bottom screen.
@@ -35,6 +46,7 @@ app/build/outputs/apk/debug/app-debug.apk
 - Image import with black/white threshold preview.
 - Stroke generation from processed images using selectable trace modes.
 - Sequential AccessibilityService gesture dispatch with cancel support.
+- The old floating command overlay has been removed; only the drawing-area selector overlay remains.
 
 ## Trace Presets
 
@@ -49,6 +61,19 @@ Current presets:
 - **Dense Detail**: slower, more complete or sketchy output.
 - **Outline Only**: edge-focused trace for bold line art.
 - **Custom**: active when manual settings are changed.
+
+## Known Good Presets
+
+- **Simple cartoon characters like Kirby**: use **Tomodachi Simple Cartoon** or **Balanced**.
+- **Detailed characters like Lucario**: use **Tomodachi Detailed Character**.
+- **Thin or complex character art like Gardevoir**: use **Soft / Light Character** or **Tomodachi Detailed Character**. If details are still missing, lower row step and minimum run length toward `1`.
+
+## Troubleshooting
+
+- **Missing interior details**: use **Tomodachi Detailed Character** or increase edge sensitivity.
+- **Too many specks or artifacts**: lower edge sensitivity, raise minimum component size, or use a less dense preset.
+- **Lines are not fully connected**: use a thicker brush or denser preset, then do manual cleanup before bucket fill.
+- **Drawing appears in the wrong location**: redo the area selection overlay and save the bounds again.
 
 ## Known Issues
 
