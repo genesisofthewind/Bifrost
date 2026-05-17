@@ -69,7 +69,6 @@ import com.genesisofthewind.bifrost.engine.TracePresets
 import com.genesisofthewind.bifrost.engine.TraceSettings
 import com.genesisofthewind.bifrost.services.CanvasSelectorOverlayService
 import com.genesisofthewind.bifrost.services.DrawAccessibilityService
-import com.genesisofthewind.bifrost.services.FloatingOverlayService
 import com.genesisofthewind.bifrost.ui.theme.BackgroundDark
 import com.genesisofthewind.bifrost.ui.theme.BifrostTheme
 import com.genesisofthewind.bifrost.ui.theme.BorderDark
@@ -99,8 +98,6 @@ class MainActivity : ComponentActivity() {
                     MainScreen(
                         calibrationStore = calibrationStore,
                         onOpenAccessibility = { openAccessibilitySettings() },
-                        onStartOverlay = { startOverlay() },
-                        onStopOverlay = { stopOverlay() },
                         onStartCanvasSelector = { startCanvasSelector() },
                         onStopCanvasSelector = { stopCanvasSelector() },
                         onRefreshStatus = { refreshStatus() },
@@ -122,24 +119,6 @@ class MainActivity : ComponentActivity() {
     private fun openAccessibilitySettings() {
         BifrostDebug.record("Opening accessibility settings")
         startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-    }
-
-    private fun startOverlay() {
-        if (!Settings.canDrawOverlays(this)) {
-            BifrostDebug.record("Overlay permission requested")
-            val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))
-            startActivity(intent)
-        } else {
-            BifrostDebug.record("Overlay start requested")
-            BifrostDebug.setOverlayRunning(true)
-            startService(Intent(this, FloatingOverlayService::class.java))
-        }
-    }
-
-    private fun stopOverlay() {
-        BifrostDebug.record("Overlay stop requested from app")
-        BifrostDebug.setOverlayRunning(false)
-        stopService(Intent(this, FloatingOverlayService::class.java))
     }
 
     private fun startCanvasSelector() {
@@ -189,8 +168,6 @@ class MainActivity : ComponentActivity() {
 fun MainScreen(
     calibrationStore: CalibrationStore,
     onOpenAccessibility: () -> Unit,
-    onStartOverlay: () -> Unit,
-    onStopOverlay: () -> Unit,
     onStartCanvasSelector: () -> Unit,
     onStopCanvasSelector: () -> Unit,
     onRefreshStatus: () -> Unit,
@@ -209,7 +186,7 @@ fun MainScreen(
             initialPreset = TracePresets.findByName(traceSettingsStore.loadPresetName())
         )
     }
-    val tabs = listOf("Status", "Overlay", "Calibration", "Test Shapes", "Image", "Debug")
+    val tabs = listOf("Status", "Selector", "Calibration", "Test Shapes", "Image", "Debug")
 
     LaunchedEffect(savedImageUri) {
         val uriText = savedImageUri
@@ -254,7 +231,7 @@ fun MainScreen(
 
         when (selectedTab) {
             0 -> StatusSection(onOpenAccessibility, onRefreshStatus, onRunSafeTestGesture)
-            1 -> OverlaySection(onStartOverlay, onStopOverlay, onStartCanvasSelector, onStopCanvasSelector)
+            1 -> SelectorSection(onStartCanvasSelector, onStopCanvasSelector)
             2 -> CalibrationSection(calibrationStore)
             3 -> TestShapesSection(calibrationStore, onRunCommand)
             4 -> ImageImportSection(
@@ -297,8 +274,7 @@ fun CompactStatusPanel() {
     Section("Live Status") {
         StatusRow("Accessibility enabled", BifrostDebug.accessibilityEnabled.value)
         StatusRow("Accessibility runtime ready", BifrostDebug.accessibilityRuntimeReady.value)
-        StatusRow("Overlay permission granted", BifrostDebug.overlayPermissionGranted.value)
-        StatusRow("Overlay running", BifrostDebug.overlayRunning.value)
+        StatusRow("Selector overlay permission", BifrostDebug.overlayPermissionGranted.value)
     }
 }
 
@@ -316,16 +292,13 @@ fun StatusSection(
 }
 
 @Composable
-fun OverlaySection(
-    onStartOverlay: () -> Unit,
-    onStopOverlay: () -> Unit,
+fun SelectorSection(
     onStartCanvasSelector: () -> Unit,
     onStopCanvasSelector: () -> Unit
 ) {
-    Section("Overlay") {
-        FullWidthButton("Start Floating Overlay", onStartOverlay)
-        FullWidthButton("Stop Floating Overlay", onStopOverlay, danger = true)
-        FullWidthButton("Canvas Selector Mode", onStartCanvasSelector)
+    Section("Selector Overlay") {
+        Text("Use this to position the drawing area on the top screen. Drawing controls stay on the bottom screen.", color = TextMuted, fontSize = 13.sp)
+        FullWidthButton("Show Selector Overlay", onStartCanvasSelector)
         FullWidthButton("Hide Canvas Selector", onStopCanvasSelector, danger = true)
     }
 }

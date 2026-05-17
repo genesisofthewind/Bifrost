@@ -21,7 +21,6 @@ object BifrostDebug {
     val accessibilityEnabled = mutableStateOf(false)
     val accessibilityRuntimeReady = mutableStateOf(false)
     val overlayPermissionGranted = mutableStateOf(false)
-    val overlayRunning = mutableStateOf(false)
     val displayInfo = mutableStateListOf("Display info not refreshed yet")
     val strokePreview = mutableStateListOf("No stroke preview yet")
 
@@ -48,11 +47,6 @@ object BifrostDebug {
         val granted = Settings.canDrawOverlays(context)
         overlayPermissionGranted.value = granted
         record("Overlay permission granted: $granted")
-    }
-
-    fun setOverlayRunning(isRunning: Boolean) {
-        overlayRunning.value = isRunning
-        record("Overlay running: $isRunning")
     }
 
     fun setStrokePreview(lines: List<String>) {
