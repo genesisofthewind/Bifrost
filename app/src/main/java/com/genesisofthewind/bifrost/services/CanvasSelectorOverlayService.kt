@@ -8,12 +8,14 @@ import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.IBinder
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.GridLayout
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import com.genesisofthewind.bifrost.BifrostDebug
 import com.genesisofthewind.bifrost.data.CalibrationStore
@@ -84,34 +86,113 @@ class CanvasSelectorOverlayService : Service() {
                 setTextColor(Color.WHITE)
                 setPadding(dp(8), dp(6), dp(8), dp(6))
             })
+            setOnTouchListener(selectorDragListener())
         }
         selectorView = selector
         root.addView(selector, LinearLayout.LayoutParams(selectorWidth, selectorHeight))
 
-        root.addView(controlGrid())
+        root.addView(scrollableControls())
 
         rootView = root
         windowManager.addView(root, layoutParams)
         BifrostDebug.record("Canvas selector shown ${layoutParams.x},${layoutParams.y} ${selectorWidth}x${selectorHeight}")
     }
 
-    private fun controlGrid(): GridLayout {
-        return GridLayout(this).apply {
-            columnCount = 3
-            setPadding(0, dp(6), 0, 0)
+    private fun selectorDragListener(): View.OnTouchListener {
+        return object : View.OnTouchListener {
+            private var initialX = 0
+            private var initialY = 0
+            private var initialTouchX = 0f
+            private var initialTouchY = 0f
+
+            override fun onTouch(v: View?, event: MotionEvent?): Boolean {
+                val layoutParams = params ?: return false
+                val root = rootView ?: return false
+                when (event?.action) {
+                    MotionEvent.ACTION_DOWN -> {
+                        initialX = layoutParams.x
+                        initialY = layoutParams.y
+                        initialTouchX = event.rawX
+                        initialTouchY = event.rawY
+                        return true
+                    }
+                    MotionEvent.ACTION_MOVE -> {
+                        layoutParams.x = initialX + (event.rawX - initialTouchX).toInt()
+                        layoutParams.y = initialY + (event.rawY - initialTouchY).toInt()
+                        windowManager.updateViewLayout(root, layoutParams)
+                        saveBounds(log = false)
+                        return true
+                    }
+                    MotionEvent.ACTION_UP,
+                    MotionEvent.ACTION_CANCEL -> {
+                        saveBounds(log = false)
+                        BifrostDebug.record("Selector moved by drag to ${layoutParams.x},${layoutParams.y}")
+                        return true
+                    }
+                }
+                return false
+            }
+        }
+    }
+
+    private fun scrollableControls(): LinearLayout {
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
             setBackgroundColor(Color.argb(220, 17, 17, 20))
 
-            addView(controlButton("Up") { moveBy(0, -dp(8)) })
-            addView(controlButton("Taller") { resizeBy(0, dp(12)) })
-            addView(controlButton("Wide") { resizeBy(dp(12), 0) })
-            addView(controlButton("Left") { moveBy(-dp(8), 0) })
-            addView(controlButton("Save") { saveBounds() })
-            addView(controlButton("Right") { moveBy(dp(8), 0) })
-            addView(controlButton("Down") { moveBy(0, dp(8)) })
-            addView(controlButton("Shorter") { resizeBy(0, -dp(12)) })
-            addView(controlButton("Narrow") { resizeBy(-dp(12), 0) })
-            addView(controlButton("Reset") { resetBounds() })
-            addView(controlButton("Hide") { stopSelf() })
+            val controls = LinearLayout(this@CanvasSelectorOverlayService).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(0, dp(6), 0, 0)
+                addView(sectionLabel("Move"))
+                addView(buttonGrid(listOf(
+                    "Up" to { moveBy(0, -dp(8)) },
+                    "Left" to { moveBy(-dp(8), 0) },
+                    "Right" to { moveBy(dp(8), 0) },
+                    "Down" to { moveBy(0, dp(8)) }
+                )))
+
+                addView(sectionLabel("Resize"))
+                addView(buttonGrid(listOf(
+                    "Widen" to { resizeBy(dp(12), 0) },
+                    "Narrow" to { resizeBy(-dp(12), 0) },
+                    "Taller" to { resizeBy(0, dp(12)) },
+                    "Shorter" to { resizeBy(0, -dp(12)) }
+                )))
+            }
+
+            addView(ScrollView(this@CanvasSelectorOverlayService).apply {
+                addView(controls)
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    dp(170)
+                )
+            })
+
+            addView(sectionLabel("Actions"))
+            addView(buttonGrid(listOf(
+                "Save Bounds" to { saveBounds() },
+                "Reset Bounds" to { resetBounds() },
+                "Hide Selector" to { stopSelf() },
+                "Close Selector" to { stopSelf() }
+            )))
+        }
+    }
+
+    private fun buttonGrid(buttons: List<Pair<String, () -> Unit>>): GridLayout {
+        return GridLayout(this).apply {
+            columnCount = 2
+            buttons.forEach { (label, action) ->
+                addView(controlButton(label, action))
+            }
+        }
+    }
+
+    private fun sectionLabel(text: String): TextView {
+        return TextView(this).apply {
+            this.text = text
+            textSize = 11f
+            setTextColor(Color.LTGRAY)
+            setPadding(dp(4), dp(6), 0, dp(2))
         }
     }
 
@@ -120,8 +201,8 @@ class CanvasSelectorOverlayService : Service() {
             this.text = text
             textSize = 11f
             isAllCaps = false
-            minWidth = dp(78)
-            minHeight = dp(40)
+            minWidth = dp(96)
+            minHeight = dp(38)
             setOnClickListener { onClick() }
         }
     }
@@ -132,6 +213,7 @@ class CanvasSelectorOverlayService : Service() {
         layoutParams.x += dx
         layoutParams.y += dy
         windowManager.updateViewLayout(root, layoutParams)
+        saveBounds(log = false)
         BifrostDebug.record("Selector moved to ${layoutParams.x},${layoutParams.y}")
     }
 
@@ -141,14 +223,17 @@ class CanvasSelectorOverlayService : Service() {
         selectorHeight = (selectorHeight + dh).coerceAtLeast(dp(80))
         selector.layoutParams = LinearLayout.LayoutParams(selectorWidth, selectorHeight)
         selector.requestLayout()
+        saveBounds(log = false)
         BifrostDebug.record("Selector resized to ${selectorWidth}x${selectorHeight}")
     }
 
-    private fun saveBounds() {
+    private fun saveBounds(log: Boolean = true) {
         val layoutParams = params ?: return
         calibrationStore.saveTopLeft(layoutParams.x.toFloat(), layoutParams.y.toFloat())
         calibrationStore.saveBottomRight((layoutParams.x + selectorWidth).toFloat(), (layoutParams.y + selectorHeight).toFloat())
-        BifrostDebug.record("Selector bounds saved: ${layoutParams.x},${layoutParams.y} -> ${layoutParams.x + selectorWidth},${layoutParams.y + selectorHeight}")
+        if (log) {
+            BifrostDebug.record("Selector bounds saved: ${layoutParams.x},${layoutParams.y} -> ${layoutParams.x + selectorWidth},${layoutParams.y + selectorHeight}")
+        }
     }
 
     private fun resetBounds() {
