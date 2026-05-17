@@ -2,8 +2,10 @@ package com.genesisofthewind.bifrost.engine
 
 import android.graphics.Bitmap
 import android.graphics.Color
+import android.graphics.Rect
 import com.genesisofthewind.bifrost.data.CalibrationStore
 import com.genesisofthewind.bifrost.data.CalibrationValues
+import java.util.ArrayDeque
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -27,7 +29,9 @@ data class TraceSettings(
     val maxStrokes: Int,
     val strokeDurationMs: Long,
     val delayBetweenStrokesMs: Long,
-    val edgeSensitivity: Int = 55
+    val edgeSensitivity: Int = 55,
+    val minComponentSize: Int = 4,
+    val gapClosePixels: Int = 2
 )
 
 data class TracePreset(
@@ -51,7 +55,9 @@ object TracePresets {
             maxStrokes = 300,
             strokeDurationMs = 25L,
             delayBetweenStrokesMs = 20L,
-            edgeSensitivity = 35
+            edgeSensitivity = 35,
+            minComponentSize = 8,
+            gapClosePixels = 1
         )
     )
 
@@ -67,7 +73,9 @@ object TracePresets {
             maxStrokes = 1200,
             strokeDurationMs = 35L,
             delayBetweenStrokesMs = 30L,
-            edgeSensitivity = 55
+            edgeSensitivity = 55,
+            minComponentSize = 5,
+            gapClosePixels = 2
         )
     )
 
@@ -83,7 +91,9 @@ object TracePresets {
             maxStrokes = 2200,
             strokeDurationMs = 40L,
             delayBetweenStrokesMs = 25L,
-            edgeSensitivity = 70
+            edgeSensitivity = 70,
+            minComponentSize = 1,
+            gapClosePixels = 1
         )
     )
 
@@ -99,7 +109,27 @@ object TracePresets {
             maxStrokes = 1800,
             strokeDurationMs = 35L,
             delayBetweenStrokesMs = 25L,
-            edgeSensitivity = 45
+            edgeSensitivity = 45,
+            minComponentSize = 10,
+            gapClosePixels = 3
+        )
+    )
+
+    val CleanCartoonPng = TracePreset(
+        name = "Clean Cartoon PNG",
+        description = "Transparent cleanup",
+        settings = TraceSettings(
+            mode = TraceMode.CartoonFillReady,
+            threshold = 140,
+            invert = false,
+            rowStep = 1,
+            minRunLength = 2,
+            maxStrokes = 1800,
+            strokeDurationMs = 35L,
+            delayBetweenStrokesMs = 25L,
+            edgeSensitivity = 50,
+            minComponentSize = 12,
+            gapClosePixels = 3
         )
     )
 
@@ -115,7 +145,9 @@ object TracePresets {
             maxStrokes = 2400,
             strokeDurationMs = 35L,
             delayBetweenStrokesMs = 25L,
-            edgeSensitivity = 78
+            edgeSensitivity = 78,
+            minComponentSize = 2,
+            gapClosePixels = 1
         )
     )
 
@@ -131,11 +163,13 @@ object TracePresets {
             maxStrokes = 1600,
             strokeDurationMs = 35L,
             delayBetweenStrokesMs = 25L,
-            edgeSensitivity = 55
+            edgeSensitivity = 55,
+            minComponentSize = 4,
+            gapClosePixels = 2
         )
     )
 
-    val All = listOf(TomodachiCartoon, CharacterDetail, FastSparse, Balanced, DenseDetail, OutlineFocused, Custom)
+    val All = listOf(TomodachiCartoon, CleanCartoonPng, CharacterDetail, FastSparse, Balanced, DenseDetail, OutlineFocused, Custom)
 }
 
 data class ImageTraceResult(
@@ -144,11 +178,14 @@ data class ImageTraceResult(
     val warning: String?
 )
 
+private const val ALPHA_THRESHOLD = 24
+
 class ImageTraceEngine(private val calibrationStore: CalibrationStore) {
     fun createTracePlan(source: Bitmap, settings: TraceSettings): ImageTraceResult {
         val values = calibrationStore.getValues()
         val canvas = TraceBounds.fromValues(values).inset()
-        val sample = scaleForTracing(source)
+        val preprocessed = preprocessSource(source)
+        val sample = preprocessed.bitmap
         val processed = Bitmap.createBitmap(sample.width, sample.height, Bitmap.Config.ARGB_8888)
         val threshold = settings.threshold.coerceIn(0, 255)
         val rowStep = settings.rowStep.coerceIn(1, 16)
@@ -157,13 +194,16 @@ class ImageTraceEngine(private val calibrationStore: CalibrationStore) {
         val strokeDurationMs = settings.strokeDurationMs.coerceIn(15L, 1200L)
         val delayBetweenStrokesMs = settings.delayBetweenStrokesMs.coerceIn(0L, 500L)
         val edgeSensitivity = settings.edgeSensitivity.coerceIn(1, 100)
+        val minComponentSize = settings.minComponentSize.coerceIn(1, 200)
+        val gapClosePixels = settings.gapClosePixels.coerceIn(0, 6)
 
         val fit = fitInsideCanvas(sample.width, sample.height, canvas)
         val rawBlackPixels = Array(sample.height) { BooleanArray(sample.width) }
         for (y in 0 until sample.height) {
             var x = 0
             while (x < sample.width) {
-                val black = isBlack(sample.getPixel(x, y), threshold, settings.invert)
+                val pixel = sample.getPixel(x, y)
+                val black = Color.alpha(pixel) >= ALPHA_THRESHOLD && isBlack(pixel, threshold, settings.invert)
                 rawBlackPixels[y][x] = black
                 processed.setPixel(x, y, if (black) Color.BLACK else Color.WHITE)
                 x++
@@ -173,21 +213,22 @@ class ImageTraceEngine(private val calibrationStore: CalibrationStore) {
         val blackPixels = connectShortHorizontalGaps(removeSpecks(rawBlackPixels, minNeighbors = 2), maxGap = 1)
         paintPixels(processed, blackPixels)
         val baseEdgePixels = connectShortVerticalGaps(
-            connectShortHorizontalGaps(removeSpecks(edgePixels(blackPixels, processed), minNeighbors = 1), maxGap = 2),
-            maxGap = 2
+            connectShortHorizontalGaps(removeSpecks(edgePixels(blackPixels, processed), minNeighbors = 1), maxGap = gapClosePixels.coerceAtMost(2)),
+            maxGap = gapClosePixels.coerceAtMost(2)
         )
         val cartoonEdgePixels = connectShortVerticalGaps(
-            connectShortHorizontalGaps(removeSpecks(baseEdgePixels, minNeighbors = 1), maxGap = 3),
-            maxGap = 3
+            connectShortHorizontalGaps(removeSpecks(baseEdgePixels, minNeighbors = 1), maxGap = gapClosePixels),
+            maxGap = gapClosePixels
         )
+        val internalDarkPixels = removeSpecks(rawBlackPixels, minNeighbors = 1)
         val characterDetailPixels = connectShortVerticalGaps(
             connectShortHorizontalGaps(
-                combinePixels(baseEdgePixels, colorBoundaryEdges(sample, edgeSensitivity)),
-                maxGap = 1
+                combinePixels(combinePixels(baseEdgePixels, colorBoundaryEdges(sample, edgeSensitivity)), internalDarkPixels),
+                maxGap = gapClosePixels.coerceAtMost(1)
             ),
-            maxGap = 1
+            maxGap = gapClosePixels.coerceAtMost(1)
         )
-        val tracePixels = when (settings.mode) {
+        val cleanupInput = when (settings.mode) {
             TraceMode.FillScanline -> blackPixels
             TraceMode.Outline -> baseEdgePixels
             TraceMode.SparseSketch -> baseEdgePixels
@@ -195,6 +236,15 @@ class ImageTraceEngine(private val calibrationStore: CalibrationStore) {
             TraceMode.CartoonFillReady -> cartoonEdgePixels
             TraceMode.CharacterDetail -> characterDetailPixels
         }
+        val cleanup = removeSmallComponents(
+            pixels = cleanupInput,
+            minComponentSize = when (settings.mode) {
+                TraceMode.CharacterDetail -> minComponentSize.coerceAtMost(2)
+                else -> minComponentSize
+            },
+            keepDistance = 2
+        )
+        val tracePixels = cleanup.pixels
         paintPixels(processed, tracePixels)
         val effectiveRowStep = when (settings.mode) {
             TraceMode.FillScanline -> rowStep
@@ -285,12 +335,18 @@ class ImageTraceEngine(private val calibrationStore: CalibrationStore) {
             add("command: Imported Image Trace")
             add("trace mode: ${settings.mode.label}")
             add("source image: ${source.width}x${source.height}")
+            add("alpha-aware preprocessing: ${preprocessed.alphaAwareUsed}")
+            add("alpha crop bounds: ${preprocessed.cropLabel}")
             add("processed image: ${processed.width}x${processed.height}")
             add("selector bounds: left=${canvas.left}, top=${canvas.top}, right=${canvas.right}, bottom=${canvas.bottom}")
             add("fit bounds: left=${fit.left}, top=${fit.top}, right=${fit.right}, bottom=${fit.bottom}")
             add("threshold: $threshold")
             add("invert: ${settings.invert}")
             add("edge sensitivity: $edgeSensitivity")
+            add("minimum component size: $minComponentSize")
+            add("removed small components: ${cleanup.removedComponents}")
+            add("removed small pixels: ${cleanup.removedPixels}")
+            add("gap close pixels: $gapClosePixels")
             add("row step: $effectiveRowStep")
             add("minimum run length: $effectiveMinRun")
             add("max strokes: $maxStrokes")
@@ -495,6 +551,98 @@ class ImageTraceEngine(private val calibrationStore: CalibrationStore) {
         }
     }
 
+    private data class ComponentCleanupResult(
+        val pixels: Array<BooleanArray>,
+        val removedComponents: Int,
+        val removedPixels: Int
+    )
+
+    private data class PixelComponent(val pixels: List<Pair<Int, Int>>, val isLarge: Boolean)
+
+    private fun removeSmallComponents(
+        pixels: Array<BooleanArray>,
+        minComponentSize: Int,
+        keepDistance: Int
+    ): ComponentCleanupResult {
+        if (minComponentSize <= 1) return ComponentCleanupResult(pixels, 0, 0)
+
+        val height = pixels.size
+        val width = pixels.firstOrNull()?.size ?: 0
+        val visited = Array(height) { BooleanArray(width) }
+        val components = mutableListOf<PixelComponent>()
+        val largeMask = Array(height) { BooleanArray(width) }
+
+        for (y in 0 until height) {
+            for (x in 0 until width) {
+                if (!pixels[y][x] || visited[y][x]) continue
+                val componentPixels = collectComponent(pixels, visited, x, y)
+                val isLarge = componentPixels.size >= minComponentSize
+                components.add(PixelComponent(componentPixels, isLarge))
+                if (isLarge) {
+                    componentPixels.forEach { (px, py) -> largeMask[py][px] = true }
+                }
+            }
+        }
+
+        val cleaned = Array(height) { BooleanArray(width) }
+        var removedComponents = 0
+        var removedPixels = 0
+        components.forEach { component ->
+            val keep = component.isLarge || component.pixels.any { (x, y) -> nearLargeComponent(largeMask, x, y, keepDistance) }
+            if (keep) {
+                component.pixels.forEach { (x, y) -> cleaned[y][x] = true }
+            } else {
+                removedComponents++
+                removedPixels += component.pixels.size
+            }
+        }
+
+        return ComponentCleanupResult(cleaned, removedComponents, removedPixels)
+    }
+
+    private fun collectComponent(
+        pixels: Array<BooleanArray>,
+        visited: Array<BooleanArray>,
+        startX: Int,
+        startY: Int
+    ): List<Pair<Int, Int>> {
+        val height = pixels.size
+        val width = pixels.firstOrNull()?.size ?: 0
+        val queue = ArrayDeque<Pair<Int, Int>>()
+        val component = mutableListOf<Pair<Int, Int>>()
+        visited[startY][startX] = true
+        queue.add(startX to startY)
+
+        while (queue.isNotEmpty()) {
+            val (x, y) = queue.removeFirst()
+            component.add(x to y)
+            for (dy in -1..1) {
+                for (dx in -1..1) {
+                    if (dx == 0 && dy == 0) continue
+                    val nx = x + dx
+                    val ny = y + dy
+                    if (nx in 0 until width && ny in 0 until height && pixels[ny][nx] && !visited[ny][nx]) {
+                        visited[ny][nx] = true
+                        queue.add(nx to ny)
+                    }
+                }
+            }
+        }
+
+        return component
+    }
+
+    private fun nearLargeComponent(mask: Array<BooleanArray>, x: Int, y: Int, distance: Int): Boolean {
+        val height = mask.size
+        val width = mask.firstOrNull()?.size ?: 0
+        for (ny in (y - distance)..(y + distance)) {
+            for (nx in (x - distance)..(x + distance)) {
+                if (nx in 0 until width && ny in 0 until height && mask[ny][nx]) return true
+            }
+        }
+        return false
+    }
+
     private fun removeSpecks(pixels: Array<BooleanArray>, minNeighbors: Int): Array<BooleanArray> {
         val height = pixels.size
         val width = pixels.firstOrNull()?.size ?: 0
@@ -643,6 +791,59 @@ class ImageTraceEngine(private val calibrationStore: CalibrationStore) {
                 StrokeSpec(drawX, startY, drawX, endY, strokeDurationMs, delayBetweenStrokesMs, "$label col=$x", true)
             )
         }
+    }
+
+    private data class PreprocessedBitmap(
+        val bitmap: Bitmap,
+        val alphaAwareUsed: Boolean,
+        val cropLabel: String
+    )
+
+    private fun preprocessSource(source: Bitmap): PreprocessedBitmap {
+        val alphaBounds = nonTransparentBounds(source)
+        val alphaAware = alphaBounds != null && (
+            alphaBounds.left > 0 ||
+                alphaBounds.top > 0 ||
+                alphaBounds.right < source.width ||
+                alphaBounds.bottom < source.height
+            )
+        val cropped = alphaBounds?.let { bounds ->
+            Bitmap.createBitmap(source, bounds.left, bounds.top, bounds.width(), bounds.height())
+        } ?: source
+        val scaled = scaleForTracing(cropped)
+        val label = alphaBounds?.let { "${it.left},${it.top} -> ${it.right},${it.bottom}" } ?: "none"
+        return PreprocessedBitmap(scaled, alphaAware, label)
+    }
+
+    private fun nonTransparentBounds(source: Bitmap): Rect? {
+        var left = source.width
+        var top = source.height
+        var right = -1
+        var bottom = -1
+        var sawTransparent = false
+
+        for (y in 0 until source.height) {
+            for (x in 0 until source.width) {
+                val alpha = Color.alpha(source.getPixel(x, y))
+                if (alpha < ALPHA_THRESHOLD) {
+                    sawTransparent = true
+                    continue
+                }
+                left = min(left, x)
+                top = min(top, y)
+                right = max(right, x + 1)
+                bottom = max(bottom, y + 1)
+            }
+        }
+
+        if (!sawTransparent || right <= left || bottom <= top) return null
+        val margin = 2
+        return Rect(
+            (left - margin).coerceAtLeast(0),
+            (top - margin).coerceAtLeast(0),
+            (right + margin).coerceAtMost(source.width),
+            (bottom + margin).coerceAtMost(source.height)
+        )
     }
 
     private fun scaleForTracing(source: Bitmap): Bitmap {

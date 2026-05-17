@@ -449,6 +449,8 @@ class ImageTraceUiState {
     var strokeDurationText by mutableStateOf("35")
     var delayBetweenStrokesText by mutableStateOf("25")
     var edgeSensitivityText by mutableStateOf("45")
+    var minComponentSizeText by mutableStateOf("10")
+    var gapClosePixelsText by mutableStateOf("3")
     var tracePlan by mutableStateOf<StrokePlan?>(null)
     var warning by mutableStateOf<String?>(null)
 
@@ -504,7 +506,9 @@ fun ImageImportSection(
             maxStrokes = imageState.maxStrokesText.toIntOrNull()?.coerceIn(20, 3000) ?: 650,
             strokeDurationMs = imageState.strokeDurationText.toLongOrNull()?.coerceIn(15L, 1200L) ?: 70L,
             delayBetweenStrokesMs = imageState.delayBetweenStrokesText.toLongOrNull()?.coerceIn(0L, 500L) ?: 45L,
-            edgeSensitivity = imageState.edgeSensitivityText.toIntOrNull()?.coerceIn(1, 100) ?: 55
+            edgeSensitivity = imageState.edgeSensitivityText.toIntOrNull()?.coerceIn(1, 100) ?: 55,
+            minComponentSize = imageState.minComponentSizeText.toIntOrNull()?.coerceIn(1, 200) ?: 4,
+            gapClosePixels = imageState.gapClosePixelsText.toIntOrNull()?.coerceIn(0, 6) ?: 2
         )
     }
 
@@ -541,6 +545,8 @@ fun ImageImportSection(
         imageState.strokeDurationText = settings.strokeDurationMs.toString()
         imageState.delayBetweenStrokesText = settings.delayBetweenStrokesMs.toString()
         imageState.edgeSensitivityText = settings.edgeSensitivity.toString()
+        imageState.minComponentSizeText = settings.minComponentSize.toString()
+        imageState.gapClosePixelsText = settings.gapClosePixels.toString()
         imageState.tracePlan = null
         imageState.processedBitmap = null
         imageState.warning = null
@@ -649,6 +655,22 @@ fun ImageImportSection(
             markCustom()
         })
         Text("Higher edge sensitivity preserves more interior color/brightness boundaries.", color = TextMuted, fontSize = 12.sp)
+        CoordinateField("Minimum component size", imageState.minComponentSizeText, {
+            imageState.minComponentSizeText = it
+            markCustom()
+        }, {
+            imageState.minComponentSizeText = nudgeText(imageState.minComponentSizeText, it).toIntOrNull()?.coerceIn(1, 200)?.toString() ?: "4"
+            markCustom()
+        })
+        Text("Removes tiny disconnected specks. Lower it for detailed character markings.", color = TextMuted, fontSize = 12.sp)
+        CoordinateField("Gap close pixels", imageState.gapClosePixelsText, {
+            imageState.gapClosePixelsText = it
+            markCustom()
+        }, {
+            imageState.gapClosePixelsText = nudgeText(imageState.gapClosePixelsText, it).toIntOrNull()?.coerceIn(0, 6)?.toString() ?: "2"
+            markCustom()
+        })
+        Text("Connects small same-row/column breaks without broad blob filling.", color = TextMuted, fontSize = 12.sp)
         CoordinateField("Max strokes limit", imageState.maxStrokesText, {
             imageState.maxStrokesText = it
             markCustom()
@@ -739,6 +761,7 @@ fun TracePresetValues(settings: TraceSettings) {
     DebugLine(
         "sets: ${settings.mode.label}, threshold=${settings.threshold}, rowStep=${settings.rowStep}, " +
             "minRun=${settings.minRunLength}, edge=${settings.edgeSensitivity}, max=${settings.maxStrokes}, " +
+            "minComp=${settings.minComponentSize}, gap=${settings.gapClosePixels}, " +
             "duration=${settings.strokeDurationMs}ms, delay=${settings.delayBetweenStrokesMs}ms"
     )
 }
