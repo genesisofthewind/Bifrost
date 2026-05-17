@@ -1,11 +1,16 @@
 package com.genesisofthewind.bifrost
 
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -29,8 +34,10 @@ import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Slider
 import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -41,13 +48,19 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.genesisofthewind.bifrost.data.CalibrationStore
 import com.genesisofthewind.bifrost.data.CalibrationValues
+import com.genesisofthewind.bifrost.engine.ImageTraceEngine
 import com.genesisofthewind.bifrost.engine.ShapeCommand
+import com.genesisofthewind.bifrost.engine.StrokePlan
+import com.genesisofthewind.bifrost.engine.TraceSettings
 import com.genesisofthewind.bifrost.services.CanvasSelectorOverlayService
 import com.genesisofthewind.bifrost.services.DrawAccessibilityService
 import com.genesisofthewind.bifrost.services.FloatingOverlayService
@@ -86,7 +99,9 @@ class MainActivity : ComponentActivity() {
                         onStopCanvasSelector = { stopCanvasSelector() },
                         onRefreshStatus = { refreshStatus() },
                         onRunSafeTestGesture = { runSafeTestGesture() },
-                        onRunCommand = { runGesture(it) }
+                        onRunCommand = { runGesture(it) },
+                        onRunTracePlan = { runStrokePlan(it) },
+                        onCancelDrawing = { cancelCurrentDrawing() }
                     )
                 }
             }
@@ -152,6 +167,16 @@ class MainActivity : ComponentActivity() {
         DrawAccessibilityService.getInstance()?.executeCommand(command)
             ?: BifrostDebug.record("Gesture unavailable: accessibility service is not connected")
     }
+
+    private fun runStrokePlan(plan: StrokePlan) {
+        DrawAccessibilityService.getInstance()?.executeStrokePlan(plan)
+            ?: BifrostDebug.record("Trace unavailable: accessibility service is not connected")
+    }
+
+    private fun cancelCurrentDrawing() {
+        DrawAccessibilityService.getInstance()?.cancelCurrentDrawing()
+            ?: BifrostDebug.record("Cancel unavailable: accessibility service is not connected")
+    }
 }
 
 @Composable
@@ -164,10 +189,12 @@ fun MainScreen(
     onStopCanvasSelector: () -> Unit,
     onRefreshStatus: () -> Unit,
     onRunSafeTestGesture: () -> Unit,
-    onRunCommand: (ShapeCommand) -> Unit
+    onRunCommand: (ShapeCommand) -> Unit,
+    onRunTracePlan: (StrokePlan) -> Unit,
+    onCancelDrawing: () -> Unit
 ) {
     var selectedTab by remember { mutableStateOf(0) }
-    val tabs = listOf("Status", "Overlay", "Calibration", "Test Shapes", "Debug")
+    val tabs = listOf("Status", "Overlay", "Calibration", "Test Shapes", "Image", "Debug")
 
     Column(
         modifier = Modifier
@@ -204,7 +231,8 @@ fun MainScreen(
             1 -> OverlaySection(onStartOverlay, onStopOverlay, onStartCanvasSelector, onStopCanvasSelector)
             2 -> CalibrationSection(calibrationStore)
             3 -> TestShapesSection(calibrationStore, onRunCommand)
-            4 -> DebugSection(onRefreshStatus)
+            4 -> ImageImportSection(calibrationStore, onRunTracePlan, onCancelDrawing)
+            5 -> DebugSection(onRefreshStatus)
         }
     }
 }
@@ -371,6 +399,154 @@ fun TestShapesSection(
             saveForTest("Segmented X requested")
             onRunCommand(ShapeCommand.SegmentedXShape)
         })
+    }
+}
+
+@Composable
+fun ImageImportSection(
+    calibrationStore: CalibrationStore,
+    onRunTracePlan: (StrokePlan) -> Unit,
+    onCancelDrawing: () -> Unit
+) {
+    val context = LocalContext.current
+    val traceEngine = remember { ImageTraceEngine(calibrationStore) }
+    var sourceBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var processedBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var threshold by remember { mutableStateOf(128f) }
+    var invert by remember { mutableStateOf(false) }
+    var rowStepText by remember { mutableStateOf("4") }
+    var tracePlan by remember { mutableStateOf<StrokePlan?>(null) }
+    var warning by remember { mutableStateOf<String?>(null) }
+
+    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri == null) {
+            BifrostDebug.record("Image import cancelled")
+            return@rememberLauncherForActivityResult
+        }
+        val bitmap = context.contentResolver.openInputStream(uri)?.use { stream ->
+            BitmapFactory.decodeStream(stream)
+        }
+        if (bitmap == null) {
+            BifrostDebug.record("Image import failed")
+        } else {
+            sourceBitmap = bitmap
+            processedBitmap = null
+            tracePlan = null
+            warning = null
+            BifrostDebug.record("Image imported: ${bitmap.width}x${bitmap.height}")
+        }
+    }
+
+    fun generateTrace(): StrokePlan? {
+        val bitmap = sourceBitmap
+        if (bitmap == null) {
+            BifrostDebug.record("Generate trace skipped: no image selected")
+            return null
+        }
+        val settings = TraceSettings(
+            threshold = threshold.toInt(),
+            invert = invert,
+            rowStep = rowStepText.toIntOrNull()?.coerceIn(1, 16) ?: 4
+        )
+        val result = traceEngine.createTracePlan(bitmap, settings)
+        processedBitmap = result.processedBitmap
+        tracePlan = result.strokePlan
+        warning = result.warning
+        BifrostDebug.setStrokePreview(result.strokePlan.debugLines)
+        result.strokePlan.debugLines.forEach { BifrostDebug.record(it) }
+        result.warning?.let { BifrostDebug.record(it) }
+        return result.strokePlan
+    }
+
+    Section("Image Import") {
+        FullWidthButton("Pick Image", onClick = { imagePicker.launch("image/*") })
+        sourceBitmap?.let { bitmap ->
+            Text("Selected image: ${bitmap.width} x ${bitmap.height}", color = TextSecondary, fontSize = 13.sp)
+            ImagePreview("Original Preview", bitmap)
+        } ?: Text("No image selected", color = TextMuted, fontSize = 13.sp)
+    }
+
+    Spacer(modifier = Modifier.height(12.dp))
+
+    Section("Black / White Trace") {
+        Text("Threshold: ${threshold.toInt()}", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        Slider(
+            value = threshold,
+            onValueChange = {
+                threshold = it
+                tracePlan = null
+            },
+            valueRange = 0f..255f
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text("Invert", color = TextPrimary, fontSize = 14.sp)
+            Switch(
+                checked = invert,
+                onCheckedChange = {
+                    invert = it
+                    tracePlan = null
+                }
+            )
+        }
+        CoordinateField("Row step / detail", rowStepText, {
+            rowStepText = it
+            tracePlan = null
+        }, {
+            rowStepText = nudgeText(rowStepText, it).toIntOrNull()?.coerceIn(1, 16)?.toString() ?: "4"
+            tracePlan = null
+        })
+        Text("Lower row step = more detail. Higher row step = fewer strokes.", color = TextMuted, fontSize = 12.sp)
+        processedBitmap?.let { bitmap ->
+            ImagePreview("Processed Preview", bitmap)
+        }
+    }
+
+    Spacer(modifier = Modifier.height(12.dp))
+
+    Section("Trace Drawing") {
+        FullWidthButton("Generate Trace", onClick = { generateTrace() })
+        FullWidthButton("Preview Trace Summary", onClick = { generateTrace() })
+        FullWidthButton("Draw Imported Image", onClick = {
+            val plan = tracePlan ?: generateTrace()
+            if (plan == null) {
+                BifrostDebug.record("Draw imported image skipped: no trace plan")
+            } else if (plan.strokes.isEmpty()) {
+                BifrostDebug.record("Draw imported image skipped: trace has no strokes")
+            } else {
+                BifrostDebug.record("Draw imported image requested: ${plan.strokes.size} strokes")
+                onRunTracePlan(plan)
+            }
+        })
+        FullWidthButton("Cancel Current Drawing", onCancelDrawing, danger = true)
+        tracePlan?.let { plan ->
+            Text("Trace Summary", color = TextSecondary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            plan.debugLines.forEach { line -> DebugLine(line) }
+        }
+        warning?.let { line ->
+            Text(line, color = RedAccent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+@Composable
+fun ImagePreview(label: String, bitmap: Bitmap) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(label, color = TextSecondary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+        Image(
+            bitmap = bitmap.asImageBitmap(),
+            contentDescription = label,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(180.dp)
+                .background(BackgroundDark, RoundedCornerShape(6.dp))
+                .border(1.dp, ButtonBorderDark, RoundedCornerShape(6.dp))
+                .padding(6.dp),
+            contentScale = ContentScale.Fit
+        )
     }
 }
 

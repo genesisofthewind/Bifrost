@@ -18,6 +18,7 @@ class DrawAccessibilityService : AccessibilityService() {
 
     private lateinit var drawEngine: DrawEngine
     private val mainHandler = Handler(Looper.getMainLooper())
+    private var activeRunId = 0
 
     companion object {
         private var instance: DrawAccessibilityService? = null
@@ -56,6 +57,13 @@ class DrawAccessibilityService : AccessibilityService() {
         val commandName = command.javaClass.simpleName
         BifrostDebug.record("Selected command: $commandName")
         val plan = drawEngine.createStrokePlanForCommand(command)
+        executeStrokePlan(plan)
+    }
+
+    fun executeStrokePlan(plan: StrokePlan) {
+        activeRunId++
+        val runId = activeRunId
+        BifrostDebug.record("Selected command: ${plan.commandName}")
         BifrostDebug.setStrokePreview(plan.debugLines)
         plan.debugLines.forEach { BifrostDebug.record(it) }
         if (plan.strokes.isEmpty()) {
@@ -63,21 +71,35 @@ class DrawAccessibilityService : AccessibilityService() {
             return
         }
 
-        dispatchStroke(plan, 0)
+        dispatchStroke(plan, 0, runId)
     }
 
-    private fun dispatchStroke(plan: StrokePlan, index: Int) {
+    fun cancelCurrentDrawing() {
+        activeRunId++
+        mainHandler.removeCallbacksAndMessages(null)
+        BifrostDebug.record("Current drawing cancelled")
+    }
+
+    private fun dispatchStroke(plan: StrokePlan, index: Int, runId: Int) {
+        if (runId != activeRunId) {
+            BifrostDebug.record("Gesture queue stopped: ${plan.commandName}")
+            return
+        }
         val stroke = plan.strokes[index]
         BifrostDebug.record("Dispatching ${plan.commandName} stroke ${index + 1}/${plan.strokes.size}: ${stroke.describe(index + 1)}")
         val dispatched = dispatchGesture(createGesture(stroke), object : GestureResultCallback() {
             override fun onCompleted(gestureDescription: GestureDescription) {
                 super.onCompleted(gestureDescription)
+                if (runId != activeRunId) {
+                    BifrostDebug.record("Gesture completion ignored after cancel: ${plan.commandName}")
+                    return
+                }
                 BifrostDebug.record("Gesture completed: ${plan.commandName} stroke ${index + 1}/${plan.strokes.size}")
                 val nextIndex = index + 1
                 if (nextIndex < plan.strokes.size) {
                     BifrostDebug.record("Waiting ${stroke.delayAfterMs}ms before next stroke")
                     mainHandler.postDelayed({
-                        dispatchStroke(plan, nextIndex)
+                        dispatchStroke(plan, nextIndex, runId)
                     }, stroke.delayAfterMs)
                 }
             }
