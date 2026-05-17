@@ -61,6 +61,8 @@ import com.genesisofthewind.bifrost.engine.ImageTraceEngine
 import com.genesisofthewind.bifrost.engine.ShapeCommand
 import com.genesisofthewind.bifrost.engine.StrokePlan
 import com.genesisofthewind.bifrost.engine.TraceMode
+import com.genesisofthewind.bifrost.engine.TracePreset
+import com.genesisofthewind.bifrost.engine.TracePresets
 import com.genesisofthewind.bifrost.engine.TraceSettings
 import com.genesisofthewind.bifrost.services.CanvasSelectorOverlayService
 import com.genesisofthewind.bifrost.services.DrawAccessibilityService
@@ -414,6 +416,7 @@ fun ImageImportSection(
     var sourceBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var processedBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var traceMode by remember { mutableStateOf(TraceMode.FillScanline) }
+    var selectedPreset by remember { mutableStateOf(TracePresets.Custom) }
     var threshold by remember { mutableStateOf(128f) }
     var invert by remember { mutableStateOf(false) }
     var rowStepText by remember { mutableStateOf("4") }
@@ -443,13 +446,8 @@ fun ImageImportSection(
         }
     }
 
-    fun generateTrace(): StrokePlan? {
-        val bitmap = sourceBitmap
-        if (bitmap == null) {
-            BifrostDebug.record("Generate trace skipped: no image selected")
-            return null
-        }
-        val settings = TraceSettings(
+    fun currentTraceSettings(): TraceSettings {
+        return TraceSettings(
             mode = traceMode,
             threshold = threshold.toInt(),
             invert = invert,
@@ -459,6 +457,19 @@ fun ImageImportSection(
             strokeDurationMs = strokeDurationText.toLongOrNull()?.coerceIn(40L, 1200L) ?: 70L,
             delayBetweenStrokesMs = delayBetweenStrokesText.toLongOrNull()?.coerceIn(0L, 500L) ?: 45L
         )
+    }
+
+    fun markCustom() {
+        selectedPreset = TracePresets.Custom
+        tracePlan = null
+    }
+
+    fun generateTrace(settings: TraceSettings = currentTraceSettings()): StrokePlan? {
+        val bitmap = sourceBitmap
+        if (bitmap == null) {
+            BifrostDebug.record("Generate trace skipped: no image selected")
+            return null
+        }
         val result = traceEngine.createTracePlan(bitmap, settings)
         processedBitmap = result.processedBitmap
         tracePlan = result.strokePlan
@@ -467,6 +478,26 @@ fun ImageImportSection(
         result.strokePlan.debugLines.forEach { BifrostDebug.record(it) }
         result.warning?.let { BifrostDebug.record(it) }
         return result.strokePlan
+    }
+
+    fun applyPreset(preset: TracePreset) {
+        selectedPreset = preset
+        val settings = preset.settings ?: return
+        traceMode = settings.mode
+        threshold = settings.threshold.toFloat()
+        invert = settings.invert
+        rowStepText = settings.rowStep.toString()
+        minRunLengthText = settings.minRunLength.toString()
+        maxStrokesText = settings.maxStrokes.toString()
+        strokeDurationText = settings.strokeDurationMs.toString()
+        delayBetweenStrokesText = settings.delayBetweenStrokesMs.toString()
+        tracePlan = null
+        processedBitmap = null
+        warning = null
+        BifrostDebug.record("Trace preset applied: ${preset.name}")
+        if (sourceBitmap != null) {
+            generateTrace(settings)
+        }
     }
 
     Section("Image Import") {
@@ -480,20 +511,23 @@ fun ImageImportSection(
     Spacer(modifier = Modifier.height(12.dp))
 
     Section("Black / White Trace") {
+        Text("Preset: ${selectedPreset.name}", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        Text(selectedPreset.description, color = TextMuted, fontSize = 12.sp)
+        TracePresetSelector(selectedPreset, onPresetSelected = { applyPreset(it) })
         Text("Trace Mode: ${traceMode.label}", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
         FullWidthButton("Fill Trace / Scanline Trace", onClick = {
             traceMode = TraceMode.FillScanline
-            tracePlan = null
+            markCustom()
             processedBitmap = null
         })
         FullWidthButton("Outline Trace", onClick = {
             traceMode = TraceMode.Outline
-            tracePlan = null
+            markCustom()
             processedBitmap = null
         })
         FullWidthButton("Sparse Sketch Trace", onClick = {
             traceMode = TraceMode.SparseSketch
-            tracePlan = null
+            markCustom()
             processedBitmap = null
         })
         Text("Threshold: ${threshold.toInt()}", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
@@ -501,7 +535,7 @@ fun ImageImportSection(
             value = threshold,
             onValueChange = {
                 threshold = it
-                tracePlan = null
+                markCustom()
             },
             valueRange = 0f..255f
         )
@@ -515,45 +549,45 @@ fun ImageImportSection(
                 checked = invert,
                 onCheckedChange = {
                     invert = it
-                    tracePlan = null
+                    markCustom()
                 }
             )
         }
         CoordinateField("Row step / detail", rowStepText, {
             rowStepText = it
-            tracePlan = null
+            markCustom()
         }, {
             rowStepText = nudgeText(rowStepText, it).toIntOrNull()?.coerceIn(1, 16)?.toString() ?: "4"
-            tracePlan = null
+            markCustom()
         })
         Text("Lower row step = more detail. Higher row step = fewer strokes.", color = TextMuted, fontSize = 12.sp)
         CoordinateField("Minimum run length", minRunLengthText, {
             minRunLengthText = it
-            tracePlan = null
+            markCustom()
         }, {
             minRunLengthText = nudgeText(minRunLengthText, it).toIntOrNull()?.coerceIn(1, 64)?.toString() ?: "3"
-            tracePlan = null
+            markCustom()
         })
         CoordinateField("Max strokes limit", maxStrokesText, {
             maxStrokesText = it
-            tracePlan = null
+            markCustom()
         }, {
             maxStrokesText = nudgeText(maxStrokesText, it * 50).toIntOrNull()?.coerceIn(20, 3000)?.toString() ?: "650"
-            tracePlan = null
+            markCustom()
         })
         CoordinateField("Stroke duration ms", strokeDurationText, {
             strokeDurationText = it
-            tracePlan = null
+            markCustom()
         }, {
             strokeDurationText = nudgeText(strokeDurationText, it * 10).toIntOrNull()?.coerceIn(40, 1200)?.toString() ?: "70"
-            tracePlan = null
+            markCustom()
         })
         CoordinateField("Delay between strokes ms", delayBetweenStrokesText, {
             delayBetweenStrokesText = it
-            tracePlan = null
+            markCustom()
         }, {
             delayBetweenStrokesText = nudgeText(delayBetweenStrokesText, it * 10).toIntOrNull()?.coerceIn(0, 500)?.toString() ?: "45"
-            tracePlan = null
+            markCustom()
         })
         processedBitmap?.let { bitmap ->
             ImagePreview("Processed Preview", bitmap)
@@ -585,6 +619,56 @@ fun ImageImportSection(
         warning?.let { line ->
             Text(line, color = RedAccent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
         }
+    }
+}
+
+@Composable
+fun TracePresetSelector(
+    selectedPreset: TracePreset,
+    onPresetSelected: (TracePreset) -> Unit
+) {
+    val presets = TracePresets.All
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        presets.chunked(2).forEach { rowPresets ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                rowPresets.forEach { preset ->
+                    CompactTraceButton(
+                        text = preset.name,
+                        selected = preset.name == selectedPreset.name,
+                        modifier = Modifier.weight(1f),
+                        onClick = { onPresetSelected(preset) }
+                    )
+                }
+                if (rowPresets.size == 1) {
+                    Spacer(modifier = Modifier.weight(1f))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun CompactTraceButton(
+    text: String,
+    selected: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    Button(
+        onClick = onClick,
+        modifier = modifier.height(44.dp),
+        shape = RoundedCornerShape(6.dp),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = if (selected) CyanAccent else ButtonDark,
+            contentColor = if (selected) BackgroundDark else TextPrimary
+        ),
+        border = androidx.compose.foundation.BorderStroke(1.dp, if (selected) CyanAccent else ButtonBorderDark),
+        contentPadding = PaddingValues(horizontal = 8.dp)
+    ) {
+        Text(text, fontSize = 12.sp, fontWeight = FontWeight.Bold)
     }
 }
 

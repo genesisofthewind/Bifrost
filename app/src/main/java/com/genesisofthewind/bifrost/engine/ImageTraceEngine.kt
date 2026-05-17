@@ -26,6 +26,78 @@ data class TraceSettings(
     val delayBetweenStrokesMs: Long
 )
 
+data class TracePreset(
+    val name: String,
+    val description: String,
+    val settings: TraceSettings?
+)
+
+object TracePresets {
+    val Custom = TracePreset("Custom", "Modified settings", null)
+
+    val FastSketch = TracePreset(
+        name = "Fast Sketch",
+        description = "Fast rough trace",
+        settings = TraceSettings(
+            mode = TraceMode.SparseSketch,
+            threshold = 128,
+            invert = false,
+            rowStep = 6,
+            minRunLength = 8,
+            maxStrokes = 300,
+            strokeDurationMs = 25L,
+            delayBetweenStrokesMs = 20L
+        )
+    )
+
+    val SimpleOutline = TracePreset(
+        name = "Simple Outline",
+        description = "Balanced outline",
+        settings = TraceSettings(
+            mode = TraceMode.Outline,
+            threshold = 128,
+            invert = false,
+            rowStep = 3,
+            minRunLength = 5,
+            maxStrokes = 800,
+            strokeDurationMs = 35L,
+            delayBetweenStrokesMs = 30L
+        )
+    )
+
+    val CleanCartoon = TracePreset(
+        name = "Clean Cartoon",
+        description = "Cartoon/sticker art",
+        settings = TraceSettings(
+            mode = TraceMode.Outline,
+            threshold = 140,
+            invert = false,
+            rowStep = 2,
+            minRunLength = 6,
+            maxStrokes = 1200,
+            strokeDurationMs = 35L,
+            delayBetweenStrokesMs = 30L
+        )
+    )
+
+    val DenseDetail = TracePreset(
+        name = "Dense Detail",
+        description = "More detail, slower draw",
+        settings = TraceSettings(
+            mode = TraceMode.Outline,
+            threshold = 128,
+            invert = false,
+            rowStep = 1,
+            minRunLength = 2,
+            maxStrokes = 2000,
+            strokeDurationMs = 40L,
+            delayBetweenStrokesMs = 25L
+        )
+    )
+
+    val All = listOf(FastSketch, SimpleOutline, CleanCartoon, DenseDetail, Custom)
+}
+
 data class ImageTraceResult(
     val processedBitmap: Bitmap,
     val strokePlan: StrokePlan,
