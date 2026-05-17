@@ -70,9 +70,9 @@ class CanvasSelectorOverlayService : Service() {
         params = layoutParams
 
         val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
+            orientation = LinearLayout.HORIZONTAL
             setPadding(dp(4), dp(4), dp(4), dp(4))
-            setBackgroundColor(Color.argb(80, 0, 0, 0))
+            setBackgroundColor(Color.argb(45, 0, 0, 0))
         }
 
         val selector = FrameLayout(this).apply {
@@ -91,7 +91,7 @@ class CanvasSelectorOverlayService : Service() {
         selectorView = selector
         root.addView(selector, LinearLayout.LayoutParams(selectorWidth, selectorHeight))
 
-        root.addView(scrollableControls())
+        root.addView(sideControls())
 
         rootView = root
         windowManager.addView(root, layoutParams)
@@ -135,14 +135,16 @@ class CanvasSelectorOverlayService : Service() {
         }
     }
 
-    private fun scrollableControls(): LinearLayout {
+    private fun sideControls(): LinearLayout {
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
+            setPadding(dp(4), 0, 0, 0)
             setBackgroundColor(Color.argb(220, 17, 17, 20))
+            layoutParams = LinearLayout.LayoutParams(dp(210), LinearLayout.LayoutParams.WRAP_CONTENT)
 
             val controls = LinearLayout(this@CanvasSelectorOverlayService).apply {
                 orientation = LinearLayout.VERTICAL
-                setPadding(0, dp(6), 0, 0)
+                setPadding(0, dp(4), 0, 0)
                 addView(sectionLabel("Move"))
                 addView(buttonGrid(listOf(
                     "Up" to { moveBy(0, -dp(8)) },
@@ -163,8 +165,8 @@ class CanvasSelectorOverlayService : Service() {
             addView(ScrollView(this@CanvasSelectorOverlayService).apply {
                 addView(controls)
                 layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    dp(170)
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    dp(180)
                 )
             })
 
@@ -181,6 +183,10 @@ class CanvasSelectorOverlayService : Service() {
     private fun buttonGrid(buttons: List<Pair<String, () -> Unit>>): GridLayout {
         return GridLayout(this).apply {
             columnCount = 2
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
             buttons.forEach { (label, action) ->
                 addView(controlButton(label, action))
             }
@@ -201,7 +207,7 @@ class CanvasSelectorOverlayService : Service() {
             this.text = text
             textSize = 11f
             isAllCaps = false
-            minWidth = dp(96)
+            minWidth = dp(92)
             minHeight = dp(38)
             setOnClickListener { onClick() }
         }
