@@ -59,6 +59,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.genesisofthewind.bifrost.data.CalibrationStore
 import com.genesisofthewind.bifrost.data.CalibrationValues
+import com.genesisofthewind.bifrost.data.TraceSettingsStore
 import com.genesisofthewind.bifrost.engine.ImageTraceEngine
 import com.genesisofthewind.bifrost.engine.ShapeCommand
 import com.genesisofthewind.bifrost.engine.StrokePlan
@@ -200,8 +201,14 @@ fun MainScreen(
 ) {
     var selectedTab by remember { mutableStateOf(0) }
     var savedImageUri by rememberSaveable { mutableStateOf<String?>(null) }
-    val imageTraceState = remember { ImageTraceUiState() }
     val context = LocalContext.current
+    val traceSettingsStore = remember { TraceSettingsStore(context) }
+    val imageTraceState = remember {
+        ImageTraceUiState(
+            initialSettings = traceSettingsStore.loadSettings(),
+            initialPreset = TracePresets.findByName(traceSettingsStore.loadPresetName())
+        )
+    }
     val tabs = listOf("Status", "Overlay", "Calibration", "Test Shapes", "Image", "Debug")
 
     LaunchedEffect(savedImageUri) {
@@ -253,6 +260,7 @@ fun MainScreen(
             4 -> ImageImportSection(
                 calibrationStore = calibrationStore,
                 imageState = imageTraceState,
+                traceSettingsStore = traceSettingsStore,
                 onImageUriChanged = { savedImageUri = it },
                 onRunTracePlan = onRunTracePlan,
                 onCancelDrawing = onCancelDrawing
@@ -435,22 +443,25 @@ fun TestShapesSection(
     }
 }
 
-class ImageTraceUiState {
+class ImageTraceUiState(
+    initialSettings: TraceSettings = TracePresets.TomodachiCartoon.settings!!,
+    initialPreset: TracePreset = TracePresets.TomodachiCartoon
+) {
     var sourceBitmap by mutableStateOf<Bitmap?>(null)
     var sourceUriText by mutableStateOf<String?>(null)
     var processedBitmap by mutableStateOf<Bitmap?>(null)
-    var traceMode by mutableStateOf(TraceMode.CartoonFillReady)
-    var selectedPreset by mutableStateOf(TracePresets.TomodachiCartoon)
-    var threshold by mutableStateOf(142f)
-    var invert by mutableStateOf(false)
-    var rowStepText by mutableStateOf("1")
-    var minRunLengthText by mutableStateOf("2")
-    var maxStrokesText by mutableStateOf("1800")
-    var strokeDurationText by mutableStateOf("35")
-    var delayBetweenStrokesText by mutableStateOf("25")
-    var edgeSensitivityText by mutableStateOf("45")
-    var minComponentSizeText by mutableStateOf("10")
-    var gapClosePixelsText by mutableStateOf("3")
+    var traceMode by mutableStateOf(initialSettings.mode)
+    var selectedPreset by mutableStateOf(initialPreset)
+    var threshold by mutableStateOf(initialSettings.threshold.toFloat())
+    var invert by mutableStateOf(initialSettings.invert)
+    var rowStepText by mutableStateOf(initialSettings.rowStep.toString())
+    var minRunLengthText by mutableStateOf(initialSettings.minRunLength.toString())
+    var maxStrokesText by mutableStateOf(initialSettings.maxStrokes.toString())
+    var strokeDurationText by mutableStateOf(initialSettings.strokeDurationMs.toString())
+    var delayBetweenStrokesText by mutableStateOf(initialSettings.delayBetweenStrokesMs.toString())
+    var edgeSensitivityText by mutableStateOf(initialSettings.edgeSensitivity.toString())
+    var minComponentSizeText by mutableStateOf(initialSettings.minComponentSize.toString())
+    var gapClosePixelsText by mutableStateOf(initialSettings.gapClosePixels.toString())
     var tracePlan by mutableStateOf<StrokePlan?>(null)
     var warning by mutableStateOf<String?>(null)
 
@@ -467,6 +478,7 @@ class ImageTraceUiState {
 fun ImageImportSection(
     calibrationStore: CalibrationStore,
     imageState: ImageTraceUiState,
+    traceSettingsStore: TraceSettingsStore,
     onImageUriChanged: (String?) -> Unit,
     onRunTracePlan: (StrokePlan) -> Unit,
     onCancelDrawing: () -> Unit
@@ -515,6 +527,8 @@ fun ImageImportSection(
     fun markCustom() {
         imageState.selectedPreset = TracePresets.Custom
         imageState.tracePlan = null
+        traceSettingsStore.savePresetName(TracePresets.Custom.name)
+        traceSettingsStore.saveSettings(currentTraceSettings())
     }
 
     fun generateTrace(settings: TraceSettings = currentTraceSettings()): StrokePlan? {
@@ -551,13 +565,15 @@ fun ImageImportSection(
         imageState.processedBitmap = null
         imageState.warning = null
         BifrostDebug.record("Trace preset applied: ${preset.name}")
+        traceSettingsStore.savePresetName(preset.name)
+        traceSettingsStore.saveSettings(settings)
         if (imageState.sourceBitmap != null) {
             generateTrace(settings)
         }
     }
 
-    Section("Image Import") {
-        FullWidthButton("Pick Image", onClick = { imagePicker.launch(arrayOf("image/*")) })
+    Section("1. Load Image") {
+        FullWidthButton("Load Image", onClick = { imagePicker.launch(arrayOf("image/*")) })
         imageState.sourceBitmap?.let { bitmap ->
             Text("Selected image: ${bitmap.width} x ${bitmap.height}", color = TextSecondary, fontSize = 13.sp)
             ImagePreview("Original Preview", bitmap)
@@ -571,7 +587,11 @@ fun ImageImportSection(
 
     Spacer(modifier = Modifier.height(12.dp))
 
-    Section("Black / White Trace") {
+    Section("2. Pick Preset") {
+        Text("Recommended Use", color = TextSecondary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+        DebugLine("Tomodachi Simple Cartoon: Best for Kirby, simple cartoons, icons")
+        DebugLine("Tomodachi Detailed Character: Best for Pokemon, anime/game characters, more interior detail")
+        DebugLine("Dense Detail: Best for sketchy or artistic output")
         Text("Preset: ${imageState.selectedPreset.name}", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
         Text(imageState.selectedPreset.description, color = TextMuted, fontSize = 12.sp)
         TracePresetSelector(imageState.selectedPreset, onPresetSelected = { applyPreset(it) })
@@ -699,7 +719,7 @@ fun ImageImportSection(
 
     Spacer(modifier = Modifier.height(12.dp))
 
-    Section("Trace Drawing") {
+    Section("3. Generate And Draw") {
         FullWidthButton("Generate Trace", onClick = { generateTrace() })
         FullWidthButton("Preview Trace Summary", onClick = { generateTrace() })
         FullWidthButton("Draw Imported Image", onClick = {

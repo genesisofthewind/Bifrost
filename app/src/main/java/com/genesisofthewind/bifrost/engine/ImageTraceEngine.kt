@@ -44,7 +44,7 @@ object TracePresets {
     val Custom = TracePreset("Custom", "Modified settings", null)
 
     val FastSparse = TracePreset(
-        name = "Fast / Sparse",
+        name = "Fast Sketch",
         description = "Fast rough trace",
         settings = TraceSettings(
             mode = TraceMode.SparseSketch,
@@ -63,7 +63,7 @@ object TracePresets {
 
     val Balanced = TracePreset(
         name = "Balanced",
-        description = "Cartoon default",
+        description = "General cartoon fallback",
         settings = TraceSettings(
             mode = TraceMode.BalancedHybrid,
             threshold = 140,
@@ -98,8 +98,8 @@ object TracePresets {
     )
 
     val TomodachiCartoon = TracePreset(
-        name = "Tomodachi Cartoon",
-        description = "Bucket-fill friendly",
+        name = "Tomodachi Simple Cartoon",
+        description = "Best for Kirby, simple cartoons, icons",
         settings = TraceSettings(
             mode = TraceMode.CartoonFillReady,
             threshold = 142,
@@ -117,7 +117,7 @@ object TracePresets {
 
     val CleanCartoonPng = TracePreset(
         name = "Clean Cartoon PNG",
-        description = "Transparent cleanup",
+        description = "Best for transparent cartoon images",
         settings = TraceSettings(
             mode = TraceMode.CartoonFillReady,
             threshold = 140,
@@ -134,8 +134,8 @@ object TracePresets {
     )
 
     val CharacterDetail = TracePreset(
-        name = "Character Detail",
-        description = "Interior markings",
+        name = "Tomodachi Detailed Character",
+        description = "Best for Pokemon, anime/game characters",
         settings = TraceSettings(
             mode = TraceMode.CharacterDetail,
             threshold = 132,
@@ -152,8 +152,8 @@ object TracePresets {
     )
 
     val OutlineFocused = TracePreset(
-        name = "Outline Focused",
-        description = "Edges only",
+        name = "Outline Only",
+        description = "Best for bold line art",
         settings = TraceSettings(
             mode = TraceMode.Outline,
             threshold = 132,
@@ -170,6 +170,10 @@ object TracePresets {
     )
 
     val All = listOf(TomodachiCartoon, CleanCartoonPng, CharacterDetail, FastSparse, Balanced, DenseDetail, OutlineFocused, Custom)
+
+    fun findByName(name: String): TracePreset {
+        return All.firstOrNull { it.name == name } ?: TomodachiCartoon
+    }
 }
 
 data class ImageTraceResult(
