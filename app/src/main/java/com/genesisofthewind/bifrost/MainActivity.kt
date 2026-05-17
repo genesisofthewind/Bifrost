@@ -48,6 +48,7 @@ import androidx.compose.ui.unit.sp
 import com.genesisofthewind.bifrost.data.CalibrationStore
 import com.genesisofthewind.bifrost.data.CalibrationValues
 import com.genesisofthewind.bifrost.engine.ShapeCommand
+import com.genesisofthewind.bifrost.services.CanvasSelectorOverlayService
 import com.genesisofthewind.bifrost.services.DrawAccessibilityService
 import com.genesisofthewind.bifrost.services.FloatingOverlayService
 import com.genesisofthewind.bifrost.ui.theme.BackgroundDark
@@ -81,6 +82,8 @@ class MainActivity : ComponentActivity() {
                         onOpenAccessibility = { openAccessibilitySettings() },
                         onStartOverlay = { startOverlay() },
                         onStopOverlay = { stopOverlay() },
+                        onStartCanvasSelector = { startCanvasSelector() },
+                        onStopCanvasSelector = { stopCanvasSelector() },
                         onRefreshStatus = { refreshStatus() },
                         onRunSafeTestGesture = { runSafeTestGesture() },
                         onRunCommand = { runGesture(it) }
@@ -118,6 +121,22 @@ class MainActivity : ComponentActivity() {
         stopService(Intent(this, FloatingOverlayService::class.java))
     }
 
+    private fun startCanvasSelector() {
+        if (!Settings.canDrawOverlays(this)) {
+            BifrostDebug.record("Canvas selector needs overlay permission")
+            val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))
+            startActivity(intent)
+        } else {
+            BifrostDebug.record("Canvas selector mode requested")
+            startService(Intent(this, CanvasSelectorOverlayService::class.java))
+        }
+    }
+
+    private fun stopCanvasSelector() {
+        BifrostDebug.record("Canvas selector hide requested")
+        stopService(Intent(this, CanvasSelectorOverlayService::class.java))
+    }
+
     private fun refreshStatus() {
         BifrostDebug.refreshAccessibilityStatus(this)
         BifrostDebug.refreshOverlayPermission(this)
@@ -141,6 +160,8 @@ fun MainScreen(
     onOpenAccessibility: () -> Unit,
     onStartOverlay: () -> Unit,
     onStopOverlay: () -> Unit,
+    onStartCanvasSelector: () -> Unit,
+    onStopCanvasSelector: () -> Unit,
     onRefreshStatus: () -> Unit,
     onRunSafeTestGesture: () -> Unit,
     onRunCommand: (ShapeCommand) -> Unit
@@ -180,7 +201,7 @@ fun MainScreen(
 
         when (selectedTab) {
             0 -> StatusSection(onOpenAccessibility, onRefreshStatus, onRunSafeTestGesture)
-            1 -> OverlaySection(onStartOverlay, onStopOverlay)
+            1 -> OverlaySection(onStartOverlay, onStopOverlay, onStartCanvasSelector, onStopCanvasSelector)
             2 -> CalibrationSection(calibrationStore)
             3 -> TestShapesSection(calibrationStore, onRunCommand)
             4 -> DebugSection(onRefreshStatus)
@@ -228,11 +249,15 @@ fun StatusSection(
 @Composable
 fun OverlaySection(
     onStartOverlay: () -> Unit,
-    onStopOverlay: () -> Unit
+    onStopOverlay: () -> Unit,
+    onStartCanvasSelector: () -> Unit,
+    onStopCanvasSelector: () -> Unit
 ) {
     Section("Overlay") {
         FullWidthButton("Start Floating Overlay", onStartOverlay)
         FullWidthButton("Stop Floating Overlay", onStopOverlay, danger = true)
+        FullWidthButton("Canvas Selector Mode", onStartCanvasSelector)
+        FullWidthButton("Hide Canvas Selector", onStopCanvasSelector, danger = true)
     }
 }
 
@@ -328,6 +353,10 @@ fun TestShapesSection(
         })
         FullWidthButton("Run Known-Good Square", onClick = {
             saveForTest("Known-good square requested")
+            onRunCommand(ShapeCommand.CalibratedSmallSquare)
+        })
+        FullWidthButton("Test Square Inside Selector", onClick = {
+            saveForTest("Selector square requested")
             onRunCommand(ShapeCommand.CalibratedSmallSquare)
         })
         FullWidthButton("Test X Shape", onClick = {

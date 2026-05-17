@@ -163,6 +163,11 @@ class FloatingOverlayService : Service() {
                     executeOverlayCommand(ShapeCommand.CalibratedSmallSquare)
                 })
 
+                addView(menuButton("Canvas Selector") {
+                    BifrostDebug.record("Overlay canvas selector tapped")
+                    startService(Intent(this@FloatingOverlayService, CanvasSelectorOverlayService::class.java))
+                })
+
                 addView(menuButton("Diagonal TL->BR") {
                     BifrostDebug.record("Overlay diagonal TL->BR tapped")
                     executeOverlayCommand(ShapeCommand.DiagonalTopLeftToBottomRight)
