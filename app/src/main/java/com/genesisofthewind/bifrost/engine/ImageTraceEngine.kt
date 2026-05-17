@@ -12,7 +12,8 @@ import kotlin.math.roundToInt
 enum class TraceMode(val label: String) {
     FillScanline("Fill Trace / Scanline Trace"),
     Outline("Outline Trace"),
-    SparseSketch("Sparse Sketch Trace")
+    SparseSketch("Sparse Sketch Trace"),
+    BalancedHybrid("Balanced / Hybrid")
 }
 
 data class TraceSettings(
@@ -35,45 +36,30 @@ data class TracePreset(
 object TracePresets {
     val Custom = TracePreset("Custom", "Modified settings", null)
 
-    val FastSketch = TracePreset(
-        name = "Fast Sketch",
+    val FastSparse = TracePreset(
+        name = "Fast / Sparse",
         description = "Fast rough trace",
         settings = TraceSettings(
             mode = TraceMode.SparseSketch,
             threshold = 128,
             invert = false,
             rowStep = 6,
-            minRunLength = 8,
+            minRunLength = 7,
             maxStrokes = 300,
             strokeDurationMs = 25L,
             delayBetweenStrokesMs = 20L
         )
     )
 
-    val SimpleOutline = TracePreset(
-        name = "Simple Outline",
-        description = "Balanced outline",
+    val Balanced = TracePreset(
+        name = "Balanced",
+        description = "Cartoon default",
         settings = TraceSettings(
-            mode = TraceMode.Outline,
-            threshold = 128,
-            invert = false,
-            rowStep = 3,
-            minRunLength = 5,
-            maxStrokes = 800,
-            strokeDurationMs = 35L,
-            delayBetweenStrokesMs = 30L
-        )
-    )
-
-    val CleanCartoon = TracePreset(
-        name = "Clean Cartoon",
-        description = "Cartoon/sticker art",
-        settings = TraceSettings(
-            mode = TraceMode.Outline,
+            mode = TraceMode.BalancedHybrid,
             threshold = 140,
             invert = false,
             rowStep = 2,
-            minRunLength = 6,
+            minRunLength = 3,
             maxStrokes = 1200,
             strokeDurationMs = 35L,
             delayBetweenStrokesMs = 30L
@@ -84,18 +70,33 @@ object TracePresets {
         name = "Dense Detail",
         description = "More detail, slower draw",
         settings = TraceSettings(
-            mode = TraceMode.Outline,
+            mode = TraceMode.BalancedHybrid,
             threshold = 128,
             invert = false,
             rowStep = 1,
-            minRunLength = 2,
-            maxStrokes = 2000,
+            minRunLength = 1,
+            maxStrokes = 2200,
             strokeDurationMs = 40L,
             delayBetweenStrokesMs = 25L
         )
     )
 
-    val All = listOf(FastSketch, SimpleOutline, CleanCartoon, DenseDetail, Custom)
+    val OutlineFocused = TracePreset(
+        name = "Outline Focused",
+        description = "Edges only",
+        settings = TraceSettings(
+            mode = TraceMode.Outline,
+            threshold = 132,
+            invert = false,
+            rowStep = 1,
+            minRunLength = 2,
+            maxStrokes = 1600,
+            strokeDurationMs = 35L,
+            delayBetweenStrokesMs = 25L
+        )
+    )
+
+    val All = listOf(FastSparse, Balanced, DenseDetail, OutlineFocused, Custom)
 }
 
 data class ImageTraceResult(
@@ -114,35 +115,45 @@ class ImageTraceEngine(private val calibrationStore: CalibrationStore) {
         val rowStep = settings.rowStep.coerceIn(1, 16)
         val minRunLength = settings.minRunLength.coerceIn(1, 64)
         val maxStrokes = settings.maxStrokes.coerceIn(20, 3000)
-        val strokeDurationMs = settings.strokeDurationMs.coerceIn(40L, 1200L)
+        val strokeDurationMs = settings.strokeDurationMs.coerceIn(15L, 1200L)
         val delayBetweenStrokesMs = settings.delayBetweenStrokesMs.coerceIn(0L, 500L)
 
         val fit = fitInsideCanvas(sample.width, sample.height, canvas)
-        val blackPixels = Array(sample.height) { BooleanArray(sample.width) }
+        val rawBlackPixels = Array(sample.height) { BooleanArray(sample.width) }
         for (y in 0 until sample.height) {
             var x = 0
             while (x < sample.width) {
                 val black = isBlack(sample.getPixel(x, y), threshold, settings.invert)
-                blackPixels[y][x] = black
+                rawBlackPixels[y][x] = black
                 processed.setPixel(x, y, if (black) Color.BLACK else Color.WHITE)
                 x++
             }
         }
 
+        val blackPixels = connectShortHorizontalGaps(removeSpecks(rawBlackPixels, minNeighbors = 2), maxGap = 1)
+        paintPixels(processed, blackPixels)
+        val edgePixels = connectShortVerticalGaps(
+            connectShortHorizontalGaps(removeSpecks(edgePixels(blackPixels, processed), minNeighbors = 1), maxGap = 2),
+            maxGap = 2
+        )
         val tracePixels = when (settings.mode) {
             TraceMode.FillScanline -> blackPixels
-            TraceMode.Outline -> edgePixels(blackPixels, processed)
-            TraceMode.SparseSketch -> edgePixels(blackPixels, processed)
+            TraceMode.Outline -> edgePixels
+            TraceMode.SparseSketch -> edgePixels
+            TraceMode.BalancedHybrid -> edgePixels
         }
+        paintPixels(processed, tracePixels)
         val effectiveRowStep = when (settings.mode) {
             TraceMode.FillScanline -> rowStep
             TraceMode.Outline -> rowStep
             TraceMode.SparseSketch -> (rowStep * 2).coerceIn(2, 24)
+            TraceMode.BalancedHybrid -> rowStep
         }
         val effectiveMinRun = when (settings.mode) {
             TraceMode.FillScanline -> minRunLength
             TraceMode.Outline -> minRunLength
             TraceMode.SparseSketch -> (minRunLength * 2).coerceIn(2, 96)
+            TraceMode.BalancedHybrid -> minRunLength
         }
         val result = when (settings.mode) {
             TraceMode.FillScanline -> horizontalRuns(
@@ -174,6 +185,16 @@ class ImageTraceEngine(private val calibrationStore: CalibrationStore) {
                 delayBetweenStrokesMs = delayBetweenStrokesMs,
                 label = "sparse sketch"
             )
+            TraceMode.BalancedHybrid -> balancedHybridRuns(
+                edgePixels = tracePixels,
+                fillPixels = blackPixels,
+                fit = fit,
+                rowStep = effectiveRowStep,
+                minRunLength = effectiveMinRun,
+                maxStrokes = maxStrokes,
+                strokeDurationMs = strokeDurationMs,
+                delayBetweenStrokesMs = delayBetweenStrokesMs
+            )
         }
 
         val warning = if (result.capped) {
@@ -196,6 +217,7 @@ class ImageTraceEngine(private val calibrationStore: CalibrationStore) {
             add("invert: ${settings.invert}")
             add("row step: $effectiveRowStep")
             add("minimum run length: $effectiveMinRun")
+            add("max strokes: $maxStrokes")
             add("stroke duration ms: $strokeDurationMs")
             add("delay between strokes ms: $delayBetweenStrokesMs")
             add("generated strokes: ${finalStrokes.size}")
@@ -277,6 +299,33 @@ class ImageTraceEngine(private val calibrationStore: CalibrationStore) {
         return TraceBuildResult(strokes, capped)
     }
 
+    private fun balancedHybridRuns(
+        edgePixels: Array<BooleanArray>,
+        fillPixels: Array<BooleanArray>,
+        fit: TraceBounds,
+        rowStep: Int,
+        minRunLength: Int,
+        maxStrokes: Int,
+        strokeDurationMs: Long,
+        delayBetweenStrokesMs: Long
+    ): TraceBuildResult {
+        val outline = outlineRuns(edgePixels, fit, rowStep, minRunLength, maxStrokes, strokeDurationMs, delayBetweenStrokesMs)
+        if (outline.capped || outline.strokes.size >= maxStrokes) return outline
+
+        val remaining = maxStrokes - outline.strokes.size
+        val fill = horizontalRuns(
+            pixels = fillPixels,
+            fit = fit,
+            rowStep = (rowStep * 3).coerceIn(3, 18),
+            minRunLength = (minRunLength * 3).coerceIn(3, 96),
+            maxStrokes = remaining,
+            strokeDurationMs = strokeDurationMs,
+            delayBetweenStrokesMs = delayBetweenStrokesMs,
+            label = "hybrid light fill"
+        )
+        return TraceBuildResult(outline.strokes + fill.strokes, fill.capped)
+    }
+
     private fun edgePixels(blackPixels: Array<BooleanArray>, processed: Bitmap): Array<BooleanArray> {
         val height = blackPixels.size
         val width = blackPixels.firstOrNull()?.size ?: 0
@@ -293,6 +342,78 @@ class ImageTraceEngine(private val calibrationStore: CalibrationStore) {
             }
         }
         return edges
+    }
+
+    private fun removeSpecks(pixels: Array<BooleanArray>, minNeighbors: Int): Array<BooleanArray> {
+        val height = pixels.size
+        val width = pixels.firstOrNull()?.size ?: 0
+        val cleaned = Array(height) { BooleanArray(width) }
+        for (y in 0 until height) {
+            for (x in 0 until width) {
+                if (!pixels[y][x]) continue
+                var neighbors = 0
+                for (dy in -1..1) {
+                    for (dx in -1..1) {
+                        if (dx == 0 && dy == 0) continue
+                        val nx = x + dx
+                        val ny = y + dy
+                        if (nx in 0 until width && ny in 0 until height && pixels[ny][nx]) {
+                            neighbors++
+                        }
+                    }
+                }
+                cleaned[y][x] = neighbors >= minNeighbors
+            }
+        }
+        return cleaned
+    }
+
+    private fun connectShortHorizontalGaps(pixels: Array<BooleanArray>, maxGap: Int): Array<BooleanArray> {
+        val height = pixels.size
+        val width = pixels.firstOrNull()?.size ?: 0
+        val connected = Array(height) { y -> pixels[y].copyOf() }
+        for (y in 0 until height) {
+            var x = 0
+            while (x < width) {
+                while (x < width && pixels[y][x]) x++
+                val gapStart = x
+                while (x < width && !pixels[y][x]) x++
+                val gapEnd = x - 1
+                val gapLength = gapEnd - gapStart + 1
+                if (gapStart > 0 && x < width && gapLength in 1..maxGap) {
+                    for (fillX in gapStart..gapEnd) connected[y][fillX] = true
+                }
+            }
+        }
+        return connected
+    }
+
+    private fun connectShortVerticalGaps(pixels: Array<BooleanArray>, maxGap: Int): Array<BooleanArray> {
+        val height = pixels.size
+        val width = pixels.firstOrNull()?.size ?: 0
+        val connected = Array(height) { y -> pixels[y].copyOf() }
+        for (x in 0 until width) {
+            var y = 0
+            while (y < height) {
+                while (y < height && pixels[y][x]) y++
+                val gapStart = y
+                while (y < height && !pixels[y][x]) y++
+                val gapEnd = y - 1
+                val gapLength = gapEnd - gapStart + 1
+                if (gapStart > 0 && y < height && gapLength in 1..maxGap) {
+                    for (fillY in gapStart..gapEnd) connected[fillY][x] = true
+                }
+            }
+        }
+        return connected
+    }
+
+    private fun paintPixels(bitmap: Bitmap, pixels: Array<BooleanArray>) {
+        for (y in pixels.indices) {
+            for (x in pixels[y].indices) {
+                bitmap.setPixel(x, y, if (pixels[y][x]) Color.BLACK else Color.WHITE)
+            }
+        }
     }
 
     private fun addHorizontalStroke(

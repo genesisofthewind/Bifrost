@@ -415,15 +415,15 @@ fun ImageImportSection(
     val traceEngine = remember { ImageTraceEngine(calibrationStore) }
     var sourceBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var processedBitmap by remember { mutableStateOf<Bitmap?>(null) }
-    var traceMode by remember { mutableStateOf(TraceMode.FillScanline) }
-    var selectedPreset by remember { mutableStateOf(TracePresets.Custom) }
-    var threshold by remember { mutableStateOf(128f) }
+    var traceMode by remember { mutableStateOf(TraceMode.BalancedHybrid) }
+    var selectedPreset by remember { mutableStateOf(TracePresets.Balanced) }
+    var threshold by remember { mutableStateOf(140f) }
     var invert by remember { mutableStateOf(false) }
-    var rowStepText by remember { mutableStateOf("4") }
+    var rowStepText by remember { mutableStateOf("2") }
     var minRunLengthText by remember { mutableStateOf("3") }
-    var maxStrokesText by remember { mutableStateOf("650") }
-    var strokeDurationText by remember { mutableStateOf("70") }
-    var delayBetweenStrokesText by remember { mutableStateOf("45") }
+    var maxStrokesText by remember { mutableStateOf("1200") }
+    var strokeDurationText by remember { mutableStateOf("35") }
+    var delayBetweenStrokesText by remember { mutableStateOf("30") }
     var tracePlan by remember { mutableStateOf<StrokePlan?>(null) }
     var warning by remember { mutableStateOf<String?>(null) }
 
@@ -454,7 +454,7 @@ fun ImageImportSection(
             rowStep = rowStepText.toIntOrNull()?.coerceIn(1, 16) ?: 4,
             minRunLength = minRunLengthText.toIntOrNull()?.coerceIn(1, 64) ?: 3,
             maxStrokes = maxStrokesText.toIntOrNull()?.coerceIn(20, 3000) ?: 650,
-            strokeDurationMs = strokeDurationText.toLongOrNull()?.coerceIn(40L, 1200L) ?: 70L,
+            strokeDurationMs = strokeDurationText.toLongOrNull()?.coerceIn(15L, 1200L) ?: 70L,
             delayBetweenStrokesMs = delayBetweenStrokesText.toLongOrNull()?.coerceIn(0L, 500L) ?: 45L
         )
     }
@@ -514,6 +514,9 @@ fun ImageImportSection(
         Text("Preset: ${selectedPreset.name}", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
         Text(selectedPreset.description, color = TextMuted, fontSize = 12.sp)
         TracePresetSelector(selectedPreset, onPresetSelected = { applyPreset(it) })
+        selectedPreset.settings?.let { settings ->
+            TracePresetValues(settings)
+        }
         Text("Trace Mode: ${traceMode.label}", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
         FullWidthButton("Fill Trace / Scanline Trace", onClick = {
             traceMode = TraceMode.FillScanline
@@ -527,6 +530,11 @@ fun ImageImportSection(
         })
         FullWidthButton("Sparse Sketch Trace", onClick = {
             traceMode = TraceMode.SparseSketch
+            markCustom()
+            processedBitmap = null
+        })
+        FullWidthButton("Balanced / Hybrid", onClick = {
+            traceMode = TraceMode.BalancedHybrid
             markCustom()
             processedBitmap = null
         })
@@ -579,7 +587,7 @@ fun ImageImportSection(
             strokeDurationText = it
             markCustom()
         }, {
-            strokeDurationText = nudgeText(strokeDurationText, it * 10).toIntOrNull()?.coerceIn(40, 1200)?.toString() ?: "70"
+            strokeDurationText = nudgeText(strokeDurationText, it * 10).toIntOrNull()?.coerceIn(15, 1200)?.toString() ?: "70"
             markCustom()
         })
         CoordinateField("Delay between strokes ms", delayBetweenStrokesText, {
@@ -648,6 +656,15 @@ fun TracePresetSelector(
             }
         }
     }
+}
+
+@Composable
+fun TracePresetValues(settings: TraceSettings) {
+    DebugLine(
+        "sets: ${settings.mode.label}, threshold=${settings.threshold}, rowStep=${settings.rowStep}, " +
+            "minRun=${settings.minRunLength}, max=${settings.maxStrokes}, " +
+            "duration=${settings.strokeDurationMs}ms, delay=${settings.delayBetweenStrokesMs}ms"
+    )
 }
 
 @Composable
