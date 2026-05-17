@@ -7,11 +7,11 @@
 Bifrost is in a real-device MVP phase. Testing on the AYN Thor confirms:
 
 - The app launches and runs on real hardware.
-- The floating overlay works over top-screen apps.
 - The visual canvas selector can define the target drawing area.
 - Android AccessibilityService gesture dispatch draws real strokes into apps.
 - Bifrost can draw directly into *Tomodachi Life: Living the Dream*.
 - A simple Kirby image has been traced and drawn into Tomodachi Life, with manual outline cleanup and bucket coloring afterward.
+- More detailed character art, including Lucario-style images, can preserve internal line detail with the detailed character presets.
 
 ## Build
 
@@ -30,7 +30,6 @@ app/build/outputs/apk/debug/app-debug.apk
 ## Current Features
 
 - Compact Jetpack Compose control UI for the Thor bottom screen.
-- Floating overlay shortcuts for top-screen use.
 - Visual canvas selector overlay for setting drawing bounds.
 - Manual calibration and test-shape drawing.
 - Image import with black/white threshold preview.
@@ -41,21 +40,23 @@ app/build/outputs/apk/debug/app-debug.apk
 
 Current presets:
 
-- **Fast / Sparse**: quick rough trace with fewer strokes.
-- **Balanced**: safer default for simple cartoon images.
-- **Dense Detail**: slower, more complete trace.
-- **Outline Focused**: edge-focused trace for line art.
+- **Tomodachi Simple Cartoon**: best for Kirby, simple cartoons, icons, and bucket-fill-friendly outlines.
+- **Clean Cartoon PNG**: best for transparent cartoon images with alpha/background cleanup.
+- **Tomodachi Detailed Character**: best for Pokemon, anime/game characters, and interior markings.
+- **Soft / Light Character**: best for pale characters, soft anime/game art, and Gardevoir-like low-contrast images.
+- **Fast Sketch**: quick rough trace with fewer strokes.
+- **Balanced**: general cartoon fallback.
+- **Dense Detail**: slower, more complete or sketchy output.
+- **Outline Only**: edge-focused trace for bold line art.
 - **Custom**: active when manual settings are changed.
 
 ## Known Issues
 
-- Loaded image and processed trace state may not persist when switching tabs or opening overlays.
 - Some outlines are not fully connected, so bucket fill still requires manual cleanup.
 - Color switching is not implemented yet.
 
 ## Near-Term Roadmap
 
-- Persist selected image and processed trace across tab/overlay changes.
 - Add Bucket Fill Safe / Watertight Cartoon tracing.
 - Add stronger gap closing and outline cleanup.
 - Add palette profile groundwork for future automatic color selection.

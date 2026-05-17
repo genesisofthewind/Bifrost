@@ -564,6 +564,7 @@ fun ImageImportSection(
         Text("Recommended Use", color = TextSecondary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
         DebugLine("Tomodachi Simple Cartoon: Best for Kirby, simple cartoons, icons")
         DebugLine("Tomodachi Detailed Character: Best for Pokemon, anime/game characters, more interior detail")
+        DebugLine("Soft / Light Character: Best for pale characters, soft anime/game art, Gardevoir-like images")
         DebugLine("Dense Detail: Best for sketchy or artistic output")
         Text("Preset: ${imageState.selectedPreset.name}", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
         Text(imageState.selectedPreset.description, color = TextMuted, fontSize = 12.sp)

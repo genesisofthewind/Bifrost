@@ -151,6 +151,24 @@ object TracePresets {
         )
     )
 
+    val SoftLightCharacter = TracePreset(
+        name = "Soft / Light Character",
+        description = "Best for pale characters like Gardevoir",
+        settings = TraceSettings(
+            mode = TraceMode.CharacterDetail,
+            threshold = 154,
+            invert = false,
+            rowStep = 1,
+            minRunLength = 1,
+            maxStrokes = 2500,
+            strokeDurationMs = 35L,
+            delayBetweenStrokesMs = 25L,
+            edgeSensitivity = 92,
+            minComponentSize = 1,
+            gapClosePixels = 1
+        )
+    )
+
     val OutlineFocused = TracePreset(
         name = "Outline Only",
         description = "Best for bold line art",
@@ -169,7 +187,7 @@ object TracePresets {
         )
     )
 
-    val All = listOf(TomodachiCartoon, CleanCartoonPng, CharacterDetail, FastSparse, Balanced, DenseDetail, OutlineFocused, Custom)
+    val All = listOf(TomodachiCartoon, CleanCartoonPng, CharacterDetail, SoftLightCharacter, FastSparse, Balanced, DenseDetail, OutlineFocused, Custom)
 
     fun findByName(name: String): TracePreset {
         return All.firstOrNull { it.name == name } ?: TomodachiCartoon
@@ -518,7 +536,7 @@ class ImageTraceEngine(private val calibrationStore: CalibrationStore) {
         val width = source.width
         val height = source.height
         val edges = Array(height) { BooleanArray(width) }
-        val threshold = 185 - edgeSensitivity.coerceIn(1, 100)
+        val threshold = (130 - edgeSensitivity.coerceIn(1, 100)).coerceIn(18, 130)
         for (y in 0 until height) {
             for (x in 0 until width) {
                 val current = source.getPixel(x, y)
