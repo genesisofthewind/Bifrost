@@ -453,6 +453,12 @@ class ImageTraceUiState(
     var redMouthOverride by mutableStateOf("Auto")
     var whiteBackgroundOverride by mutableStateOf("Skip")
     var mainBodyColorOverride by mutableStateOf("Auto")
+    var brushSpacingText by mutableStateOf("4")
+    var brushLengthScaleText by mutableStateOf("90")
+    var brushPassCountText by mutableStateOf("1")
+    var brushInsetText by mutableStateOf("1")
+    var brushStrokeDurationText by mutableStateOf("80")
+    var brushDelayText by mutableStateOf("35")
     var tracePlan by mutableStateOf<StrokePlan?>(null)
     var warning by mutableStateOf<String?>(null)
 
@@ -593,7 +599,14 @@ fun ImageImportSection(
                 "blue/eyes" to imageState.blueEyesOverride,
                 "red/mouth" to imageState.redMouthOverride
             ),
-            mainBodyColorOverride = imageState.mainBodyColorOverride
+            mainBodyColorOverride = imageState.mainBodyColorOverride,
+            colorMode = imageState.imageDrawMode,
+            brushSpacingPixels = imageState.brushSpacingText.toIntOrNull()?.coerceIn(1, 16) ?: 4,
+            brushInsetPixels = imageState.brushInsetText.toIntOrNull()?.coerceIn(0, 8) ?: 1,
+            brushLengthScalePercent = imageState.brushLengthScaleText.toIntOrNull()?.coerceIn(35, 120) ?: 90,
+            brushPassCount = imageState.brushPassCountText.toIntOrNull()?.coerceIn(1, 4) ?: 1,
+            brushStrokeDurationMs = imageState.brushStrokeDurationText.toLongOrNull()?.coerceIn(25L, 800L) ?: 80L,
+            brushDelayMs = imageState.brushDelayText.toLongOrNull()?.coerceIn(0L, 300L) ?: 35L
         )
     }
 
@@ -607,7 +620,7 @@ fun ImageImportSection(
         val profile = paletteProfileStore.loadEasyModeProfile()
         paletteUiState.load(profile)
         var colorWarning: String? = null
-        val finalPlan = if (imageState.imageDrawMode == ImageDrawMode.OutlineAutoColor) {
+        val finalPlan = if (imageState.imageDrawMode != ImageDrawMode.OutlineOnly) {
             val missingTargets = paletteProfileStore.missingRequiredTargets(profile)
             if (missingTargets.isNotEmpty()) {
                 colorWarning = "Easy Mode color warning: missing required targets ${missingTargets.joinToString()}"
@@ -863,22 +876,29 @@ fun ImageImportSection(
                 BifrostDebug.record("Image draw mode: ${ImageDrawMode.OutlineOnly.label}")
             }
         )
-        CompactTraceButton(
-            text = ImageDrawMode.OutlineAutoColor.label,
-            selected = imageState.imageDrawMode == ImageDrawMode.OutlineAutoColor,
-            modifier = Modifier.fillMaxWidth(),
-            onClick = {
-                imageState.imageDrawMode = ImageDrawMode.OutlineAutoColor
-                imageState.tracePlan = null
-                BifrostDebug.record("Image draw mode: ${ImageDrawMode.OutlineAutoColor.label}")
-            }
-        )
+        listOf(
+            ImageDrawMode.OutlineAutoColorBrush,
+            ImageDrawMode.OutlineAutoColorHybrid,
+            ImageDrawMode.OutlineAutoColorFill
+        ).forEach { mode ->
+            CompactTraceButton(
+                text = mode.label,
+                selected = imageState.imageDrawMode == mode,
+                modifier = Modifier.fillMaxWidth(),
+                onClick = {
+                    imageState.imageDrawMode = mode
+                    imageState.tracePlan = null
+                    BifrostDebug.record("Image draw mode: ${mode.label}")
+                }
+            )
+        }
         Text(
-            "Easy Mode draws the black outline first, then taps the bucket tool, palette colors, and detected flat-color regions.",
+            "Brush mode draws the black outline first, then paints detected color regions with horizontal brush strokes. Fill mode is the older bucket path.",
             color = TextMuted,
             fontSize = 12.sp
         )
         ColorMappingSection(imageState, paletteUiState.currentProfile())
+        BrushColorSettingsSection(imageState)
         PaletteProfileSection(
             paletteUiState = paletteUiState,
             targets = paletteProfileStore.tapTargets(paletteUiState.currentProfile()),
@@ -986,6 +1006,54 @@ fun ColorMappingSection(
     })
     CompactTextField("Main Body Color Override", imageState.mainBodyColorOverride, {
         imageState.mainBodyColorOverride = it
+        imageState.tracePlan = null
+    })
+}
+
+@Composable
+fun BrushColorSettingsSection(imageState: ImageTraceUiState) {
+    Text("Brush Color Settings", color = TextSecondary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+    DebugLine("Lower spacing or more passes colors more densely. Higher inset stays farther from outlines.")
+    CoordinateField("Stroke spacing", imageState.brushSpacingText, {
+        imageState.brushSpacingText = it
+        imageState.tracePlan = null
+    }, {
+        imageState.brushSpacingText = nudgeText(imageState.brushSpacingText, it).toIntOrNull()?.coerceIn(1, 16)?.toString() ?: "4"
+        imageState.tracePlan = null
+    })
+    CoordinateField("Stroke length scale percent", imageState.brushLengthScaleText, {
+        imageState.brushLengthScaleText = it
+        imageState.tracePlan = null
+    }, {
+        imageState.brushLengthScaleText = nudgeText(imageState.brushLengthScaleText, it * 5).toIntOrNull()?.coerceIn(35, 120)?.toString() ?: "90"
+        imageState.tracePlan = null
+    })
+    CoordinateField("Brush pass count", imageState.brushPassCountText, {
+        imageState.brushPassCountText = it
+        imageState.tracePlan = null
+    }, {
+        imageState.brushPassCountText = nudgeText(imageState.brushPassCountText, it).toIntOrNull()?.coerceIn(1, 4)?.toString() ?: "1"
+        imageState.tracePlan = null
+    })
+    CoordinateField("Inset from edges", imageState.brushInsetText, {
+        imageState.brushInsetText = it
+        imageState.tracePlan = null
+    }, {
+        imageState.brushInsetText = nudgeText(imageState.brushInsetText, it).toIntOrNull()?.coerceIn(0, 8)?.toString() ?: "1"
+        imageState.tracePlan = null
+    })
+    CoordinateField("Brush stroke duration ms", imageState.brushStrokeDurationText, {
+        imageState.brushStrokeDurationText = it
+        imageState.tracePlan = null
+    }, {
+        imageState.brushStrokeDurationText = nudgeText(imageState.brushStrokeDurationText, it * 10).toIntOrNull()?.coerceIn(25, 800)?.toString() ?: "80"
+        imageState.tracePlan = null
+    })
+    CoordinateField("Brush delay ms", imageState.brushDelayText, {
+        imageState.brushDelayText = it
+        imageState.tracePlan = null
+    }, {
+        imageState.brushDelayText = nudgeText(imageState.brushDelayText, it * 5).toIntOrNull()?.coerceIn(0, 300)?.toString() ?: "35"
         imageState.tracePlan = null
     })
 }

@@ -13,7 +13,9 @@ import kotlin.math.sqrt
 
 enum class ImageDrawMode(val label: String) {
     OutlineOnly("Outline Only"),
-    OutlineAutoColor("Outline + Auto Color (Easy Mode)")
+    OutlineAutoColorFill("Outline + Auto Color (Fill)"),
+    OutlineAutoColorBrush("Outline + Auto Color (Brush)"),
+    OutlineAutoColorHybrid("Outline + Auto Color (Hybrid)")
 }
 
 data class ColorFillResult(
@@ -25,7 +27,14 @@ data class ColorFillResult(
 data class ColorFillOptions(
     val skipWhiteTransparentBackground: Boolean = true,
     val groupOverrides: Map<String, String> = emptyMap(),
-    val mainBodyColorOverride: String? = null
+    val mainBodyColorOverride: String? = null,
+    val colorMode: ImageDrawMode = ImageDrawMode.OutlineAutoColorBrush,
+    val brushSpacingPixels: Int = 4,
+    val brushInsetPixels: Int = 1,
+    val brushLengthScalePercent: Int = 90,
+    val brushPassCount: Int = 1,
+    val brushStrokeDurationMs: Long = 80L,
+    val brushDelayMs: Long = 35L
 )
 
 class ColorFillPlanner(private val calibrationStore: CalibrationStore) {
@@ -50,8 +59,13 @@ class ColorFillPlanner(private val calibrationStore: CalibrationStore) {
         }
         strokes.addAll(outlinePlan.strokes)
 
+        val brushStrokeCountByColor = mutableMapOf<String, Int>()
+        val fillTapCountByColor = mutableMapOf<String, Int>()
+        val useBrush = options.colorMode == ImageDrawMode.OutlineAutoColorBrush || options.colorMode == ImageDrawMode.OutlineAutoColorHybrid
+        val useFill = options.colorMode == ImageDrawMode.OutlineAutoColorFill || options.colorMode == ImageDrawMode.OutlineAutoColorHybrid
+
         if (regions.isNotEmpty()) {
-            addTapIfValid(strokes, profile.fillToolX, profile.fillToolY, "select bucket/fill tool")
+            addTapIfValid(strokes, profile.penToolX, profile.penToolY, "select brush tool for color")
         }
 
         regions.groupBy { it.entry.colorName }.forEach { (_, colorRegions) ->
@@ -62,9 +76,20 @@ class ColorFillPlanner(private val calibrationStore: CalibrationStore) {
             }
             addTapIfValid(strokes, entry.tapX, entry.tapY, "select color ${entry.colorName}")
             colorRegions.sortedWith(compareBy({ it.centerY }, { it.centerX })).forEach { region ->
-                val x = fit.left + (region.centerX / max(1f, sample.width - 1f)) * fit.width
-                val y = fit.top + (region.centerY / max(1f, sample.height - 1f)) * fit.height
-                addTapIfValid(strokes, x, y, "fill ${entry.colorName} from ${region.sourceGroup}")
+                val fillThisRegion = useFill && (options.colorMode == ImageDrawMode.OutlineAutoColorFill || region.pixelCount >= 320)
+                if (fillThisRegion) {
+                    addTapIfValid(strokes, profile.fillToolX, profile.fillToolY, "select bucket/fill tool for ${entry.colorName}")
+                    val x = fit.left + (region.centerX / max(1f, sample.width - 1f)) * fit.width
+                    val y = fit.top + (region.centerY / max(1f, sample.height - 1f)) * fit.height
+                    addTapIfValid(strokes, x, y, "fill ${entry.colorName} from ${region.sourceGroup}")
+                    fillTapCountByColor[entry.colorName] = (fillTapCountByColor[entry.colorName] ?: 0) + 1
+                }
+                if (useBrush && !fillThisRegion) {
+                    addTapIfValid(strokes, profile.penToolX, profile.penToolY, "select brush tool for ${entry.colorName}")
+                    val brushStrokes = brushStrokesForRegion(region, fit, sample.width, sample.height, options)
+                    strokes.addAll(brushStrokes)
+                    brushStrokeCountByColor[entry.colorName] = (brushStrokeCountByColor[entry.colorName] ?: 0) + brushStrokes.size
+                }
             }
         }
 
@@ -80,11 +105,17 @@ class ColorFillPlanner(private val calibrationStore: CalibrationStore) {
         val sourceGroupCounts = regions.groupBy { it.sourceGroup }
         val debugLines = buildList {
             add("command: Outline + Auto Color Easy Mode")
-            add("draw mode: ${ImageDrawMode.OutlineAutoColor.label}")
+            add("draw mode: ${options.colorMode.label}")
             add("palette profile: ${profile.name}")
             add("skip white/transparent background: ${options.skipWhiteTransparentBackground}")
             add("main body color override: ${options.mainBodyColorOverride?.ifBlank { "Auto" } ?: "Auto"}")
             options.groupOverrides.forEach { (group, target) -> add("override $group -> ${target.ifBlank { "Auto" }}") }
+            add("brush spacing px: ${options.brushSpacingPixels}")
+            add("brush inset px: ${options.brushInsetPixels}")
+            add("brush length scale percent: ${options.brushLengthScalePercent}")
+            add("brush pass count: ${options.brushPassCount}")
+            add("brush stroke duration ms: ${options.brushStrokeDurationMs}")
+            add("brush delay ms: ${options.brushDelayMs}")
             add("brush tool tap: ${profile.penToolX},${profile.penToolY}")
             add("fill tool tap: ${profile.fillToolX},${profile.fillToolY}")
             profile.entries.forEach { entry -> add("${entry.colorName} tap: ${entry.tapX},${entry.tapY}") }
@@ -101,9 +132,12 @@ class ColorFillPlanner(private val calibrationStore: CalibrationStore) {
                 add("source group $sourceGroup -> $targets")
             }
             colorCounts.forEach { (colorName, count) -> add("$colorName fill regions: $count") }
+            brushStrokeCountByColor.forEach { (colorName, count) -> add("$colorName brush strokes: $count") }
+            fillTapCountByColor.forEach { (colorName, count) -> add("$colorName bucket fill taps: $count") }
             add("total fill regions: ${regions.size}")
-            add("estimated color taps: ${regions.size + colorCounts.size + if (regions.isNotEmpty()) 1 else 0}")
-            add("execution order: pen tool -> outline -> fill tool -> color swatch -> region taps")
+            add("estimated color/tool taps: ${colorCounts.size + finalStrokes.count { it.directionLabel.startsWith("select ") }}")
+            add("estimated brush strokes: ${brushStrokeCountByColor.values.sum()}")
+            add("execution order: black outline -> color swatch -> brush strokes or fill taps")
             add("generated strokes including taps: ${finalStrokes.size}")
             add("estimated draw time: ${estimatedMs / 1000f}s")
             warnings.forEach { add("warning: $it") }
@@ -169,11 +203,13 @@ class ColorFillPlanner(private val calibrationStore: CalibrationStore) {
                 var sumX = 0L
                 var sumY = 0L
                 val groupCounts = mutableMapOf<String, Int>()
+                val pixels = mutableListOf<Pair<Int, Int>>()
                 while (queue.isNotEmpty()) {
                     val (cx, cy) = queue.removeFirst()
                     count++
                     sumX += cx
                     sumY += cy
+                    pixels.add(Pair(cx, cy))
                     val sourceGroup = sourceGroups[cy][cx]
                     groupCounts[sourceGroup] = (groupCounts[sourceGroup] ?: 0) + 1
                     for ((nx, ny) in neighbors(cx, cy, width, height)) {
@@ -185,7 +221,7 @@ class ColorFillPlanner(private val calibrationStore: CalibrationStore) {
                 }
                 if (count >= 10) {
                     val sourceGroup = groupCounts.maxByOrNull { it.value }?.key ?: "unknown"
-                    regions.add(ColorRegion(usableEntries[label], sourceGroup, sumX.toFloat() / count, sumY.toFloat() / count, count))
+                    regions.add(ColorRegion(usableEntries[label], sourceGroup, sumX.toFloat() / count, sumY.toFloat() / count, count, pixels))
                 }
             }
         }
@@ -254,6 +290,86 @@ class ColorFillPlanner(private val calibrationStore: CalibrationStore) {
         return bestIndex
     }
 
+    private fun brushStrokesForRegion(
+        region: ColorRegion,
+        fit: DrawingBounds,
+        imageWidth: Int,
+        imageHeight: Int,
+        options: ColorFillOptions
+    ): List<StrokeSpec> {
+        val spacing = options.brushSpacingPixels.coerceIn(1, 16)
+        val inset = options.brushInsetPixels.coerceIn(0, 8)
+        val scale = options.brushLengthScalePercent.coerceIn(35, 120) / 100f
+        val passCount = options.brushPassCount.coerceIn(1, 4)
+        val duration = options.brushStrokeDurationMs.coerceIn(25L, 800L)
+        val delay = options.brushDelayMs.coerceIn(0L, 300L)
+        val byY = region.pixels.groupBy { it.second }
+        val strokes = mutableListOf<StrokeSpec>()
+
+        repeat(passCount) { passIndex ->
+            val rowOffset = passIndex % spacing
+            byY.keys.sorted().filter { y -> y % spacing == rowOffset }.forEach { y ->
+                val xs = byY[y].orEmpty().map { it.first }.sorted()
+                if (xs.isEmpty()) return@forEach
+                var runStart = xs.first()
+                var previous = xs.first()
+                xs.drop(1).forEach { x ->
+                    if (x == previous + 1) {
+                        previous = x
+                    } else {
+                        addBrushRun(strokes, region, fit, imageWidth, imageHeight, runStart, previous, y, inset, scale, duration, delay, passIndex, passCount)
+                        runStart = x
+                        previous = x
+                    }
+                }
+                addBrushRun(strokes, region, fit, imageWidth, imageHeight, runStart, previous, y, inset, scale, duration, delay, passIndex, passCount)
+            }
+        }
+
+        return strokes.take(360)
+    }
+
+    private fun addBrushRun(
+        strokes: MutableList<StrokeSpec>,
+        region: ColorRegion,
+        fit: DrawingBounds,
+        imageWidth: Int,
+        imageHeight: Int,
+        runStart: Int,
+        runEnd: Int,
+        y: Int,
+        inset: Int,
+        scale: Float,
+        duration: Long,
+        delay: Long,
+        passIndex: Int,
+        passCount: Int
+    ) {
+        val start = runStart + inset
+        val end = runEnd - inset
+        if (end <= start) return
+        val center = (start + end) / 2f
+        val half = ((end - start) * scale) / 2f
+        val scaledStart = (center - half).coerceAtLeast(start.toFloat())
+        val scaledEnd = (center + half).coerceAtMost(end.toFloat())
+        if (scaledEnd - scaledStart < 1f) return
+        val startX = fit.left + (scaledStart / max(1f, imageWidth - 1f)) * fit.width
+        val endX = fit.left + (scaledEnd / max(1f, imageWidth - 1f)) * fit.width
+        val drawY = fit.top + (y / max(1f, imageHeight - 1f)) * fit.height
+        val reverse = (passIndex % 2 == 1)
+        strokes.add(
+            StrokeSpec(
+                startX = if (reverse) endX else startX,
+                startY = drawY,
+                endX = if (reverse) startX else endX,
+                endY = drawY,
+                durationMs = duration,
+                delayAfterMs = delay,
+                directionLabel = "brush ${region.entry.colorName} ${region.sourceGroup} pass=${passIndex + 1}/$passCount"
+            )
+        )
+    }
+
     private fun colorDistance(pixel: Int, entry: PaletteEntry): Float {
         val red = Color.red(pixel) - entry.red
         val green = Color.green(pixel) - entry.green
@@ -303,7 +419,8 @@ class ColorFillPlanner(private val calibrationStore: CalibrationStore) {
         val sourceGroup: String,
         val centerX: Float,
         val centerY: Float,
-        val pixelCount: Int
+        val pixelCount: Int,
+        val pixels: List<Pair<Int, Int>>
     )
 
     private data class ColorDetectionResult(
