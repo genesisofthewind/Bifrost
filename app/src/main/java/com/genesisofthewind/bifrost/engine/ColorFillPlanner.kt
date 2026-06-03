@@ -37,6 +37,9 @@ class ColorFillPlanner(private val calibrationStore: CalibrationStore) {
         val warnings = mutableListOf<String>()
 
         addTapIfValid(strokes, profile.penToolX, profile.penToolY, "select pen/outline tool")
+        profile.entries.firstOrNull { it.colorName.equals("Black", ignoreCase = true) }?.let { black ->
+            addTapIfValid(strokes, black.tapX, black.tapY, "select outline color Black")
+        }
         strokes.addAll(outlinePlan.strokes)
 
         if (regions.isNotEmpty()) {

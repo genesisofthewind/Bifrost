@@ -62,18 +62,21 @@ import com.genesisofthewind.bifrost.data.CalibrationValues
 import com.genesisofthewind.bifrost.data.PaletteEntry
 import com.genesisofthewind.bifrost.data.PaletteProfile
 import com.genesisofthewind.bifrost.data.PaletteProfileStore
+import com.genesisofthewind.bifrost.data.PaletteTapTarget
 import com.genesisofthewind.bifrost.data.TraceSettingsStore
 import com.genesisofthewind.bifrost.engine.ColorFillPlanner
 import com.genesisofthewind.bifrost.engine.ImageDrawMode
 import com.genesisofthewind.bifrost.engine.ImageTraceEngine
 import com.genesisofthewind.bifrost.engine.ShapeCommand
 import com.genesisofthewind.bifrost.engine.StrokePlan
+import com.genesisofthewind.bifrost.engine.StrokeSpec
 import com.genesisofthewind.bifrost.engine.TraceMode
 import com.genesisofthewind.bifrost.engine.TracePreset
 import com.genesisofthewind.bifrost.engine.TracePresets
 import com.genesisofthewind.bifrost.engine.TraceSettings
 import com.genesisofthewind.bifrost.services.CanvasSelectorOverlayService
 import com.genesisofthewind.bifrost.services.DrawAccessibilityService
+import com.genesisofthewind.bifrost.services.PaletteCalibrationOverlayService
 import com.genesisofthewind.bifrost.ui.theme.BackgroundDark
 import com.genesisofthewind.bifrost.ui.theme.BifrostTheme
 import com.genesisofthewind.bifrost.ui.theme.BorderDark
@@ -569,11 +572,18 @@ fun ImageImportSection(
             return null
         }
         val result = traceEngine.createTracePlan(bitmap, settings)
+        val profile = paletteUiState.currentProfile()
+        var colorWarning: String? = null
         val finalPlan = if (imageState.imageDrawMode == ImageDrawMode.OutlineAutoColor) {
+            val missingTargets = paletteProfileStore.missingRequiredTargets(profile)
+            if (missingTargets.isNotEmpty()) {
+                colorWarning = "Easy Mode color warning: missing required targets ${missingTargets.joinToString()}"
+                BifrostDebug.record(colorWarning!!)
+            }
             val colorResult = colorFillPlanner.createOutlineAndFillPlan(
                 source = bitmap,
                 outlinePlan = result.strokePlan,
-                profile = paletteUiState.currentProfile()
+                profile = profile
             )
             colorResult.warning?.let { BifrostDebug.record(it) }
             colorResult.strokePlan
@@ -582,7 +592,7 @@ fun ImageImportSection(
         }
         imageState.processedBitmap = result.processedBitmap
         imageState.tracePlan = finalPlan
-        imageState.warning = result.warning
+        imageState.warning = colorWarning ?: result.warning
         BifrostDebug.setStrokePreview(finalPlan.debugLines)
         finalPlan.debugLines.forEach { BifrostDebug.record(it) }
         result.warning?.let { BifrostDebug.record(it) }
@@ -612,6 +622,46 @@ fun ImageImportSection(
         if (imageState.sourceBitmap != null) {
             generateTrace(settings)
         }
+    }
+
+    fun startPaletteCalibration(target: PaletteTapTarget) {
+        paletteProfileStore.saveEasyModeProfile(paletteUiState.currentProfile())
+        val intent = Intent(context, PaletteCalibrationOverlayService::class.java)
+            .putExtra(PaletteCalibrationOverlayService.EXTRA_TARGET_KEY, target.key)
+            .putExtra(PaletteCalibrationOverlayService.EXTRA_TARGET_LABEL, target.label)
+        context.startService(intent)
+        BifrostDebug.record("Palette setup requested: ${target.label}")
+    }
+
+    fun runTargetTap(target: PaletteTapTarget) {
+        if (target.x <= 0f || target.y <= 0f) {
+            BifrostDebug.record("Target test skipped: ${target.label} is not calibrated")
+            return
+        }
+        val stroke = StrokeSpec(target.x, target.y, target.x + 1f, target.y + 1f, 60L, 120L, "test ${target.label}")
+        val plan = StrokePlan(
+            commandName = "TestPaletteTarget",
+            debugLines = listOf("test target: ${target.label}", "tap: ${target.x},${target.y}"),
+            strokes = listOf(stroke)
+        )
+        onRunTracePlan(plan)
+    }
+
+    fun runTargets(targets: List<PaletteTapTarget>, commandName: String) {
+        val strokes = targets
+            .filter { it.x > 0f && it.y > 0f }
+            .map { target -> StrokeSpec(target.x, target.y, target.x + 1f, target.y + 1f, 60L, 180L, "test ${target.label}") }
+        if (strokes.isEmpty()) {
+            BifrostDebug.record("$commandName skipped: no calibrated targets")
+            return
+        }
+        onRunTracePlan(
+            StrokePlan(
+                commandName = commandName,
+                debugLines = targets.map { "target ${it.label}: ${it.x},${it.y}" },
+                strokes = strokes
+            )
+        )
     }
 
     Section("1. Load Image") {
@@ -791,6 +841,15 @@ fun ImageImportSection(
         )
         PaletteProfileSection(
             paletteUiState = paletteUiState,
+            targets = paletteProfileStore.tapTargets(paletteUiState.currentProfile()),
+            onSetTarget = { startPaletteCalibration(it) },
+            onTestTarget = { runTargetTap(it) },
+            onTestRequiredTargets = {
+                runTargets(
+                    paletteProfileStore.tapTargets(paletteUiState.currentProfile()).filter { it.required },
+                    "TestRequiredPaletteTargets"
+                )
+            },
             onSave = {
                 paletteProfileStore.saveEasyModeProfile(paletteUiState.currentProfile())
                 imageState.tracePlan = null
@@ -844,45 +903,114 @@ fun ImageImportSection(
 @Composable
 fun PaletteProfileSection(
     paletteUiState: PaletteProfileUiState,
+    targets: List<PaletteTapTarget>,
+    onSetTarget: (PaletteTapTarget) -> Unit,
+    onTestTarget: (PaletteTapTarget) -> Unit,
+    onTestRequiredTargets: () -> Unit,
     onSave: () -> Unit,
     onLoad: () -> Unit,
     onReset: () -> Unit
 ) {
+    var showAdvanced by remember { mutableStateOf(false) }
     Text("Palette Profile: ${paletteUiState.name}", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-    DebugLine("Calibrate these taps on the Tomodachi Life top screen. Defaults are rough Easy Mode starting points.")
-    CoordinatePairField(
-        label = "Pen / outline tool",
-        xValue = paletteUiState.penToolX,
-        yValue = paletteUiState.penToolY,
-        onXChange = { paletteUiState.penToolX = it },
-        onYChange = { paletteUiState.penToolY = it },
-        onXNudge = { paletteUiState.penToolX = nudgeText(paletteUiState.penToolX, it * 5) },
-        onYNudge = { paletteUiState.penToolY = nudgeText(paletteUiState.penToolY, it * 5) }
-    )
-    CoordinatePairField(
-        label = "Bucket / fill tool",
-        xValue = paletteUiState.fillToolX,
-        yValue = paletteUiState.fillToolY,
-        onXChange = { paletteUiState.fillToolX = it },
-        onYChange = { paletteUiState.fillToolY = it },
-        onXNudge = { paletteUiState.fillToolX = nudgeText(paletteUiState.fillToolX, it * 5) },
-        onYNudge = { paletteUiState.fillToolY = nudgeText(paletteUiState.fillToolY, it * 5) }
-    )
-    Text("Color swatches", color = TextSecondary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-    paletteUiState.entries.forEach { entry ->
-        CoordinatePairField(
-            label = entry.colorName,
-            xValue = entry.tapX,
-            yValue = entry.tapY,
-            onXChange = { entry.tapX = it },
-            onYChange = { entry.tapY = it },
-            onXNudge = { entry.tapX = nudgeText(entry.tapX, it * 5) },
-            onYNudge = { entry.tapY = nudgeText(entry.tapY, it * 5) }
+    DebugLine("Tap Set, move the top-screen crosshair onto the tool/color, then save it from the overlay.")
+    targets.forEach { target ->
+        PaletteTargetRow(
+            target = target,
+            onSetTarget = { onSetTarget(target) },
+            onTestTarget = { onTestTarget(target) }
         )
     }
-    FullWidthButton("Save Easy Mode Palette Profile", onSave)
-    FullWidthButton("Load Saved Easy Mode Palette Profile", onLoad)
-    FullWidthButton("Reset Easy Mode Palette Defaults", onReset, danger = true)
+    Text("Quick tests", color = TextSecondary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        listOf("Black", "Pink", "Fill / Bucket Tool").forEach { label ->
+            targets.firstOrNull { it.label == label }?.let { target ->
+                CompactTraceButton(
+                    text = "Tap $label",
+                    selected = false,
+                    modifier = Modifier.weight(1f),
+                    onClick = { onTestTarget(target) }
+                )
+            }
+        }
+    }
+    FullWidthButton("Test All Required Targets", onTestRequiredTargets)
+    FullWidthButton("Save Profile", onSave)
+    FullWidthButton("Load Profile", onLoad)
+    FullWidthButton("Reset Profile", onReset, danger = true)
+    CompactTraceButton(
+        text = if (showAdvanced) "Hide Advanced X/Y Fields" else "Show Advanced X/Y Fields",
+        selected = showAdvanced,
+        modifier = Modifier.fillMaxWidth(),
+        onClick = { showAdvanced = !showAdvanced }
+    )
+    if (showAdvanced) {
+        DebugLine("Advanced fallback: direct coordinate edits are still available, but crosshair setup is easier.")
+        CoordinatePairField(
+            label = "Brush Tool",
+            xValue = paletteUiState.penToolX,
+            yValue = paletteUiState.penToolY,
+            onXChange = { paletteUiState.penToolX = it },
+            onYChange = { paletteUiState.penToolY = it },
+            onXNudge = { paletteUiState.penToolX = nudgeText(paletteUiState.penToolX, it * 5) },
+            onYNudge = { paletteUiState.penToolY = nudgeText(paletteUiState.penToolY, it * 5) }
+        )
+        CoordinatePairField(
+            label = "Fill / Bucket Tool",
+            xValue = paletteUiState.fillToolX,
+            yValue = paletteUiState.fillToolY,
+            onXChange = { paletteUiState.fillToolX = it },
+            onYChange = { paletteUiState.fillToolY = it },
+            onXNudge = { paletteUiState.fillToolX = nudgeText(paletteUiState.fillToolX, it * 5) },
+            onYNudge = { paletteUiState.fillToolY = nudgeText(paletteUiState.fillToolY, it * 5) }
+        )
+        paletteUiState.entries.forEach { entry ->
+            CoordinatePairField(
+                label = entry.colorName,
+                xValue = entry.tapX,
+                yValue = entry.tapY,
+                onXChange = { entry.tapX = it },
+                onYChange = { entry.tapY = it },
+                onXNudge = { entry.tapX = nudgeText(entry.tapX, it * 5) },
+                onYNudge = { entry.tapY = nudgeText(entry.tapY, it * 5) }
+            )
+        }
+    }
+}
+
+@Composable
+fun PaletteTargetRow(
+    target: PaletteTapTarget,
+    onSetTarget: () -> Unit,
+    onTestTarget: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(BackgroundDark, RoundedCornerShape(6.dp))
+            .border(1.dp, ButtonBorderDark, RoundedCornerShape(6.dp))
+            .padding(8.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(
+                if (target.required) "${target.label} *" else target.label,
+                color = TextPrimary,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                if (target.x > 0f && target.y > 0f) "${target.x.toInt()}, ${target.y.toInt()}" else "not set",
+                color = if (target.x > 0f && target.y > 0f) TextSecondary else RedAccent,
+                fontSize = 12.sp,
+                fontFamily = FontFamily.Monospace
+            )
+        }
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            CompactTraceButton("Set", selected = false, modifier = Modifier.weight(1f), onClick = onSetTarget)
+            CompactTraceButton("Test Tap", selected = false, modifier = Modifier.weight(1f), onClick = onTestTarget)
+        }
+    }
 }
 
 @Composable

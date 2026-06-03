@@ -21,6 +21,14 @@ data class PaletteProfile(
     val entries: List<PaletteEntry>
 )
 
+data class PaletteTapTarget(
+    val key: String,
+    val label: String,
+    val x: Float,
+    val y: Float,
+    val required: Boolean
+)
+
 class PaletteProfileStore(context: Context) {
     private val prefs: SharedPreferences = context.getSharedPreferences("palette_profile_prefs", Context.MODE_PRIVATE)
 
@@ -34,8 +42,8 @@ class PaletteProfileStore(context: Context) {
             fillToolY = prefs.getFloat("fill_tool_y", fallback.fillToolY),
             entries = fallback.entries.mapIndexed { index, entry ->
                 entry.copy(
-                    tapX = prefs.getFloat("entry_${index}_x", entry.tapX),
-                    tapY = prefs.getFloat("entry_${index}_y", entry.tapY)
+                    tapX = prefs.getFloat("${entry.key}_x", prefs.getFloat("entry_${index}_x", entry.tapX)),
+                    tapY = prefs.getFloat("${entry.key}_y", prefs.getFloat("entry_${index}_y", entry.tapY))
                 )
             }
         )
@@ -52,6 +60,8 @@ class PaletteProfileStore(context: Context) {
             editor
                 .putFloat("entry_${index}_x", entry.tapX)
                 .putFloat("entry_${index}_y", entry.tapY)
+                .putFloat("${entry.key}_x", entry.tapX)
+                .putFloat("${entry.key}_y", entry.tapY)
         }
         editor.apply()
     }
@@ -62,7 +72,45 @@ class PaletteProfileStore(context: Context) {
         return profile
     }
 
+    fun updateTapTarget(targetKey: String, x: Float, y: Float): PaletteProfile {
+        val profile = loadEasyModeProfile()
+        val updated = when (targetKey) {
+            TARGET_BRUSH_TOOL -> profile.copy(penToolX = x, penToolY = y)
+            TARGET_FILL_TOOL -> profile.copy(fillToolX = x, fillToolY = y)
+            else -> profile.copy(entries = profile.entries.map { entry ->
+                if (entry.key == targetKey) entry.copy(tapX = x, tapY = y) else entry
+            })
+        }
+        saveEasyModeProfile(updated)
+        return updated
+    }
+
+    fun tapTargets(profile: PaletteProfile = loadEasyModeProfile()): List<PaletteTapTarget> {
+        return buildList {
+            add(PaletteTapTarget(TARGET_BRUSH_TOOL, "Brush Tool", profile.penToolX, profile.penToolY, true))
+            add(PaletteTapTarget(TARGET_FILL_TOOL, "Fill / Bucket Tool", profile.fillToolX, profile.fillToolY, true))
+            profile.entries.forEach { entry ->
+                add(PaletteTapTarget(entry.key, entry.colorName, entry.tapX, entry.tapY, entry.colorName in REQUIRED_COLOR_NAMES))
+            }
+        }
+    }
+
+    fun targetForKey(targetKey: String, profile: PaletteProfile = loadEasyModeProfile()): PaletteTapTarget? {
+        return tapTargets(profile).firstOrNull { it.key == targetKey }
+    }
+
+    fun missingRequiredTargets(profile: PaletteProfile = loadEasyModeProfile()): List<String> {
+        return tapTargets(profile)
+            .filter { it.required && (it.x <= 0f || it.y <= 0f) }
+            .map { it.label }
+    }
+
     companion object {
+        const val TARGET_BRUSH_TOOL = "brush_tool"
+        const val TARGET_FILL_TOOL = "fill_tool"
+
+        val REQUIRED_COLOR_NAMES = setOf("Black", "Pink", "Blue", "Red", "White")
+
         fun defaultEasyModeProfile(): PaletteProfile {
             return PaletteProfile(
                 name = "Tomodachi Life Easy Mode",
@@ -76,6 +124,7 @@ class PaletteProfileStore(context: Context) {
                     PaletteEntry("Light Gray", 1292f, 518f, 184, 188, 196),
                     PaletteEntry("White", 1352f, 518f, 245, 245, 245),
                     PaletteEntry("Red", 1164f, 584f, 190, 18, 36),
+                    PaletteEntry("Dark Pink", 1227f, 584f, 197, 38, 112),
                     PaletteEntry("Pink", 1292f, 584f, 235, 73, 205),
                     PaletteEntry("Brown", 1164f, 650f, 120, 67, 38),
                     PaletteEntry("Tan", 1292f, 650f, 232, 167, 117),
@@ -90,3 +139,6 @@ class PaletteProfileStore(context: Context) {
         }
     }
 }
+
+val PaletteEntry.key: String
+    get() = "color_${colorName.lowercase().replace(Regex("[^a-z0-9]+"), "_").trim('_')}"
