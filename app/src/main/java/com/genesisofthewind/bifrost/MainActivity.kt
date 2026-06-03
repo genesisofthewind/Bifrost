@@ -66,6 +66,7 @@ import com.genesisofthewind.bifrost.data.PaletteProfileStore
 import com.genesisofthewind.bifrost.data.PaletteTapTarget
 import com.genesisofthewind.bifrost.data.TraceSettingsStore
 import com.genesisofthewind.bifrost.engine.ColorFillPlanner
+import com.genesisofthewind.bifrost.engine.ColorFillOptions
 import com.genesisofthewind.bifrost.engine.ImageDrawMode
 import com.genesisofthewind.bifrost.engine.ImageTraceEngine
 import com.genesisofthewind.bifrost.engine.ShapeCommand
@@ -445,6 +446,13 @@ class ImageTraceUiState(
     var minComponentSizeText by mutableStateOf(initialSettings.minComponentSize.toString())
     var gapClosePixelsText by mutableStateOf(initialSettings.gapClosePixels.toString())
     var imageDrawMode by mutableStateOf(ImageDrawMode.OutlineOnly)
+    var skipWhiteTransparentBackground by mutableStateOf(true)
+    var lightPinkBodyOverride by mutableStateOf("Auto")
+    var darkPinkFeetOverride by mutableStateOf("Auto")
+    var blueEyesOverride by mutableStateOf("Auto")
+    var redMouthOverride by mutableStateOf("Auto")
+    var whiteBackgroundOverride by mutableStateOf("Skip")
+    var mainBodyColorOverride by mutableStateOf("Auto")
     var tracePlan by mutableStateOf<StrokePlan?>(null)
     var warning by mutableStateOf<String?>(null)
 
@@ -574,6 +582,21 @@ fun ImageImportSection(
         traceSettingsStore.saveSettings(currentTraceSettings())
     }
 
+    fun currentColorOptions(): ColorFillOptions {
+        return ColorFillOptions(
+            skipWhiteTransparentBackground = imageState.skipWhiteTransparentBackground,
+            groupOverrides = mapOf(
+                "white/background" to imageState.whiteBackgroundOverride,
+                "light pink/body" to imageState.lightPinkBodyOverride,
+                "pink/body" to imageState.lightPinkBodyOverride,
+                "dark pink/feet" to imageState.darkPinkFeetOverride,
+                "blue/eyes" to imageState.blueEyesOverride,
+                "red/mouth" to imageState.redMouthOverride
+            ),
+            mainBodyColorOverride = imageState.mainBodyColorOverride
+        )
+    }
+
     fun generateTrace(settings: TraceSettings = currentTraceSettings()): StrokePlan? {
         val bitmap = imageState.sourceBitmap
         if (bitmap == null) {
@@ -597,7 +620,8 @@ fun ImageImportSection(
             val colorResult = colorFillPlanner.createOutlineAndFillPlan(
                 source = bitmap,
                 outlinePlan = result.strokePlan,
-                profile = profile
+                profile = profile,
+                options = currentColorOptions()
             )
             colorResult.warning?.let { BifrostDebug.record(it) }
             colorResult.strokePlan
@@ -854,6 +878,7 @@ fun ImageImportSection(
             color = TextMuted,
             fontSize = 12.sp
         )
+        ColorMappingSection(imageState, paletteUiState.currentProfile())
         PaletteProfileSection(
             paletteUiState = paletteUiState,
             targets = paletteProfileStore.tapTargets(paletteUiState.currentProfile()),
@@ -916,6 +941,56 @@ fun ImageImportSection(
 }
 
 @Composable
+fun ColorMappingSection(
+    imageState: ImageTraceUiState,
+    profile: PaletteProfile
+) {
+    val supported = remember(profile.entries) {
+        "Auto, Skip, " + profile.entries.joinToString { it.colorName }
+    }
+    Text("Color Plan Controls", color = TextSecondary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text("Skip White / Transparent Background", color = TextPrimary, fontSize = 14.sp)
+        Switch(
+            checked = imageState.skipWhiteTransparentBackground,
+            onCheckedChange = {
+                imageState.skipWhiteTransparentBackground = it
+                imageState.tracePlan = null
+            }
+        )
+    }
+    DebugLine("Supported override values: $supported")
+    CompactTextField("Light pink / body", imageState.lightPinkBodyOverride, {
+        imageState.lightPinkBodyOverride = it
+        imageState.tracePlan = null
+    })
+    CompactTextField("Dark pink / feet", imageState.darkPinkFeetOverride, {
+        imageState.darkPinkFeetOverride = it
+        imageState.tracePlan = null
+    })
+    CompactTextField("Blue / eyes", imageState.blueEyesOverride, {
+        imageState.blueEyesOverride = it
+        imageState.tracePlan = null
+    })
+    CompactTextField("Red / mouth", imageState.redMouthOverride, {
+        imageState.redMouthOverride = it
+        imageState.tracePlan = null
+    })
+    CompactTextField("White / background", imageState.whiteBackgroundOverride, {
+        imageState.whiteBackgroundOverride = it
+        imageState.tracePlan = null
+    })
+    CompactTextField("Main Body Color Override", imageState.mainBodyColorOverride, {
+        imageState.mainBodyColorOverride = it
+        imageState.tracePlan = null
+    })
+}
+
+@Composable
 fun PaletteProfileSection(
     paletteUiState: PaletteProfileUiState,
     targets: List<PaletteTapTarget>,
@@ -936,18 +1011,19 @@ fun PaletteProfileSection(
             onTestTarget = { onTestTarget(target) }
         )
     }
-    Text("Quick tests", color = TextSecondary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-    listOf("Brush Tool", "Fill / Bucket Tool", "Black", "Pink").chunked(2).forEach { rowLabels ->
+    Text("Saved Target Test Buttons", color = TextSecondary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+    targets.chunked(2).forEach { rowTargets ->
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            rowLabels.forEach { label ->
-                targets.firstOrNull { it.label == label }?.let { target ->
-                    CompactTraceButton(
-                        text = "Tap $label",
-                        selected = false,
-                        modifier = Modifier.weight(1f),
-                        onClick = { onTestTarget(target) }
-                    )
-                }
+            rowTargets.forEach { target ->
+                CompactTraceButton(
+                    text = "Tap ${target.label}",
+                    selected = false,
+                    modifier = Modifier.weight(1f),
+                    onClick = { onTestTarget(target) }
+                )
+            }
+            if (rowTargets.size == 1) {
+                Spacer(modifier = Modifier.weight(1f))
             }
         }
     }
@@ -1219,6 +1295,34 @@ fun FullWidthButton(
         contentPadding = PaddingValues(horizontal = 14.dp)
     ) {
         Text(text, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
+fun CompactTextField(
+    label: String,
+    value: String,
+    onValueChange: (String) -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(label, color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        OutlinedTextField(
+            value = value,
+            onValueChange = onValueChange,
+            singleLine = true,
+            textStyle = LocalTextStyle.current.copy(fontSize = 15.sp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(56.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedTextColor = TextPrimary,
+                unfocusedTextColor = TextPrimary,
+                focusedBorderColor = CyanAccent,
+                unfocusedBorderColor = ButtonBorderDark,
+                focusedContainerColor = BackgroundDark,
+                unfocusedContainerColor = BackgroundDark
+            )
+        )
     }
 }
 

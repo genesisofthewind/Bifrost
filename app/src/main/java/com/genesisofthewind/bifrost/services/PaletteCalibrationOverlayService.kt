@@ -13,7 +13,6 @@ import android.view.View
 import android.view.WindowManager
 import android.widget.Button
 import android.widget.FrameLayout
-import android.widget.GridLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import com.genesisofthewind.bifrost.BifrostDebug
@@ -51,7 +50,7 @@ class PaletteCalibrationOverlayService : Service() {
         val target = paletteStore.targetForKey(targetKey)
         val startX = target?.x?.toInt()?.takeIf { it > 0 } ?: 900
         val startY = target?.y?.toInt()?.takeIf { it > 0 } ?: 500
-        controlPanelWidth = dp(220)
+        controlPanelWidth = dp(156)
         crosshairSize = dp(72)
         rootPadding = dp(4)
 
@@ -68,8 +67,8 @@ class PaletteCalibrationOverlayService : Service() {
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = startX - rootPadding - controlPanelWidth - (crosshairSize / 2)
-            y = startY - rootPadding - (crosshairSize / 2)
+            x = (startX - rootPadding - controlPanelWidth - (crosshairSize / 2)).coerceAtLeast(0)
+            y = (startY - rootPadding - (crosshairSize / 2)).coerceAtLeast(0)
         }
         params = layoutParams
 
@@ -120,31 +119,25 @@ class PaletteCalibrationOverlayService : Service() {
             layoutParams = LinearLayout.LayoutParams(controlPanelWidth, LinearLayout.LayoutParams.WRAP_CONTENT)
 
             addView(TextView(this@PaletteCalibrationOverlayService).apply {
-                text = "Tap target setup"
-                textSize = 12f
+                text = "Set target"
+                textSize = 11f
                 setTextColor(Color.LTGRAY)
+                setPadding(0, 0, 0, dp(2))
+            })
+            addView(TextView(this@PaletteCalibrationOverlayService).apply {
+                text = targetLabel
+                textSize = 12f
+                setTextColor(Color.WHITE)
                 setPadding(0, 0, 0, dp(3))
             })
             addView(TextView(this@PaletteCalibrationOverlayService).apply {
-                text = "Move crosshair to $targetLabel"
-                textSize = 13f
-                setTextColor(Color.WHITE)
-                setPadding(0, 0, 0, dp(5))
-            })
-            addView(TextView(this@PaletteCalibrationOverlayService).apply {
-                text = "Controls stay left so the Tomodachi palette remains visible."
+                text = "Drag crosshair onto target."
                 textSize = 10f
                 setTextColor(Color.LTGRAY)
-                setPadding(0, 0, 0, dp(5))
+                setPadding(0, 0, 0, dp(3))
             })
-            addView(buttonGrid(listOf(
-                "Up" to { moveBy(0, -dp(5)) },
-                "Left" to { moveBy(-dp(5), 0) },
-                "Right" to { moveBy(dp(5), 0) },
-                "Down" to { moveBy(0, dp(5)) }
-            )))
-            addView(button("Save Current Position") { saveCurrentPosition() })
-            addView(button("Close") { stopSelf() })
+            addView(button("Save Position") { saveCurrentPosition() })
+            addView(button("Cancel") { stopSelf() })
         }
     }
 
@@ -183,31 +176,15 @@ class PaletteCalibrationOverlayService : Service() {
         }
     }
 
-    private fun buttonGrid(buttons: List<Pair<String, () -> Unit>>): GridLayout {
-        return GridLayout(this).apply {
-            columnCount = 2
-            buttons.forEach { (label, action) -> addView(button(label, action)) }
-        }
-    }
-
     private fun button(text: String, onClick: () -> Unit): Button {
         return Button(this).apply {
             this.text = text
             textSize = 11f
             isAllCaps = false
-            minWidth = dp(90)
-            minHeight = dp(38)
+            minWidth = dp(132)
+            minHeight = dp(34)
             setOnClickListener { onClick() }
         }
-    }
-
-    private fun moveBy(dx: Int, dy: Int) {
-        val root = rootView ?: return
-        val layoutParams = params ?: return
-        layoutParams.x += dx
-        layoutParams.y += dy
-        windowManager.updateViewLayout(root, layoutParams)
-        BifrostDebug.record("Palette crosshair nudged to ${centerX()},${centerY()} for $targetLabel")
     }
 
     private fun saveCurrentPosition() {
