@@ -59,7 +59,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.genesisofthewind.bifrost.data.CalibrationStore
 import com.genesisofthewind.bifrost.data.CalibrationValues
+import com.genesisofthewind.bifrost.data.PaletteEntry
+import com.genesisofthewind.bifrost.data.PaletteProfile
+import com.genesisofthewind.bifrost.data.PaletteProfileStore
 import com.genesisofthewind.bifrost.data.TraceSettingsStore
+import com.genesisofthewind.bifrost.engine.ColorFillPlanner
+import com.genesisofthewind.bifrost.engine.ImageDrawMode
 import com.genesisofthewind.bifrost.engine.ImageTraceEngine
 import com.genesisofthewind.bifrost.engine.ShapeCommand
 import com.genesisofthewind.bifrost.engine.StrokePlan
@@ -435,6 +440,7 @@ class ImageTraceUiState(
     var edgeSensitivityText by mutableStateOf(initialSettings.edgeSensitivity.toString())
     var minComponentSizeText by mutableStateOf(initialSettings.minComponentSize.toString())
     var gapClosePixelsText by mutableStateOf(initialSettings.gapClosePixels.toString())
+    var imageDrawMode by mutableStateOf(ImageDrawMode.OutlineOnly)
     var tracePlan by mutableStateOf<StrokePlan?>(null)
     var warning by mutableStateOf<String?>(null)
 
@@ -444,6 +450,55 @@ class ImageTraceUiState(
         processedBitmap = null
         tracePlan = null
         warning = null
+    }
+}
+
+class PaletteProfileUiState(profile: PaletteProfile) {
+    var name by mutableStateOf(profile.name)
+    var penToolX by mutableStateOf(profile.penToolX.toInt().toString())
+    var penToolY by mutableStateOf(profile.penToolY.toInt().toString())
+    var fillToolX by mutableStateOf(profile.fillToolX.toInt().toString())
+    var fillToolY by mutableStateOf(profile.fillToolY.toInt().toString())
+    var entries by mutableStateOf(profile.entries.map { PaletteEntryUiState(it) })
+
+    fun load(profile: PaletteProfile) {
+        name = profile.name
+        penToolX = profile.penToolX.toInt().toString()
+        penToolY = profile.penToolY.toInt().toString()
+        fillToolX = profile.fillToolX.toInt().toString()
+        fillToolY = profile.fillToolY.toInt().toString()
+        entries = profile.entries.map { PaletteEntryUiState(it) }
+    }
+
+    fun currentProfile(): PaletteProfile {
+        return PaletteProfile(
+            name = name.ifBlank { "Tomodachi Life Easy Mode" },
+            penToolX = penToolX.toFloatOrNull() ?: 0f,
+            penToolY = penToolY.toFloatOrNull() ?: 0f,
+            fillToolX = fillToolX.toFloatOrNull() ?: 0f,
+            fillToolY = fillToolY.toFloatOrNull() ?: 0f,
+            entries = entries.map { it.currentEntry() }
+        )
+    }
+}
+
+class PaletteEntryUiState(entry: PaletteEntry) {
+    val colorName = entry.colorName
+    val red = entry.red
+    val green = entry.green
+    val blue = entry.blue
+    var tapX by mutableStateOf(entry.tapX.toInt().toString())
+    var tapY by mutableStateOf(entry.tapY.toInt().toString())
+
+    fun currentEntry(): PaletteEntry {
+        return PaletteEntry(
+            colorName = colorName,
+            tapX = tapX.toFloatOrNull() ?: 0f,
+            tapY = tapY.toFloatOrNull() ?: 0f,
+            red = red,
+            green = green,
+            blue = blue
+        )
     }
 }
 
@@ -458,6 +513,9 @@ fun ImageImportSection(
 ) {
     val context = LocalContext.current
     val traceEngine = remember { ImageTraceEngine(calibrationStore) }
+    val colorFillPlanner = remember { ColorFillPlanner(calibrationStore) }
+    val paletteProfileStore = remember { PaletteProfileStore(context) }
+    val paletteUiState = remember { PaletteProfileUiState(paletteProfileStore.loadEasyModeProfile()) }
 
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) {
@@ -511,13 +569,24 @@ fun ImageImportSection(
             return null
         }
         val result = traceEngine.createTracePlan(bitmap, settings)
+        val finalPlan = if (imageState.imageDrawMode == ImageDrawMode.OutlineAutoColor) {
+            val colorResult = colorFillPlanner.createOutlineAndFillPlan(
+                source = bitmap,
+                outlinePlan = result.strokePlan,
+                profile = paletteUiState.currentProfile()
+            )
+            colorResult.warning?.let { BifrostDebug.record(it) }
+            colorResult.strokePlan
+        } else {
+            result.strokePlan
+        }
         imageState.processedBitmap = result.processedBitmap
-        imageState.tracePlan = result.strokePlan
+        imageState.tracePlan = finalPlan
         imageState.warning = result.warning
-        BifrostDebug.setStrokePreview(result.strokePlan.debugLines)
-        result.strokePlan.debugLines.forEach { BifrostDebug.record(it) }
+        BifrostDebug.setStrokePreview(finalPlan.debugLines)
+        finalPlan.debugLines.forEach { BifrostDebug.record(it) }
         result.warning?.let { BifrostDebug.record(it) }
-        return result.strokePlan
+        return finalPlan
     }
 
     fun applyPreset(preset: TracePreset) {
@@ -693,7 +762,57 @@ fun ImageImportSection(
 
     Spacer(modifier = Modifier.height(12.dp))
 
-    Section("3. Generate And Draw") {
+    Section("3. Color Fill Easy Mode") {
+        Text("Draw Mode", color = TextSecondary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+        CompactTraceButton(
+            text = ImageDrawMode.OutlineOnly.label,
+            selected = imageState.imageDrawMode == ImageDrawMode.OutlineOnly,
+            modifier = Modifier.fillMaxWidth(),
+            onClick = {
+                imageState.imageDrawMode = ImageDrawMode.OutlineOnly
+                imageState.tracePlan = null
+                BifrostDebug.record("Image draw mode: ${ImageDrawMode.OutlineOnly.label}")
+            }
+        )
+        CompactTraceButton(
+            text = ImageDrawMode.OutlineAutoColor.label,
+            selected = imageState.imageDrawMode == ImageDrawMode.OutlineAutoColor,
+            modifier = Modifier.fillMaxWidth(),
+            onClick = {
+                imageState.imageDrawMode = ImageDrawMode.OutlineAutoColor
+                imageState.tracePlan = null
+                BifrostDebug.record("Image draw mode: ${ImageDrawMode.OutlineAutoColor.label}")
+            }
+        )
+        Text(
+            "Easy Mode draws the black outline first, then taps the bucket tool, palette colors, and detected flat-color regions.",
+            color = TextMuted,
+            fontSize = 12.sp
+        )
+        PaletteProfileSection(
+            paletteUiState = paletteUiState,
+            onSave = {
+                paletteProfileStore.saveEasyModeProfile(paletteUiState.currentProfile())
+                imageState.tracePlan = null
+                BifrostDebug.record("Easy Mode palette profile saved")
+            },
+            onLoad = {
+                paletteUiState.load(paletteProfileStore.loadEasyModeProfile())
+                imageState.tracePlan = null
+                BifrostDebug.record("Easy Mode palette profile loaded")
+            },
+            onReset = {
+                val profile = paletteProfileStore.resetEasyModeProfile()
+                paletteUiState.load(profile)
+                imageState.tracePlan = null
+                BifrostDebug.record("Easy Mode palette profile reset")
+            }
+        )
+    }
+
+    Spacer(modifier = Modifier.height(12.dp))
+
+    Section("4. Generate And Draw") {
         FullWidthButton("Generate Trace", onClick = { generateTrace() })
         FullWidthButton("Preview Trace Summary", onClick = { generateTrace() })
         FullWidthButton("Draw Imported Image", onClick = {
@@ -718,6 +837,72 @@ fun ImageImportSection(
         }
         imageState.warning?.let { line ->
             Text(line, color = RedAccent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+@Composable
+fun PaletteProfileSection(
+    paletteUiState: PaletteProfileUiState,
+    onSave: () -> Unit,
+    onLoad: () -> Unit,
+    onReset: () -> Unit
+) {
+    Text("Palette Profile: ${paletteUiState.name}", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+    DebugLine("Calibrate these taps on the Tomodachi Life top screen. Defaults are rough Easy Mode starting points.")
+    CoordinatePairField(
+        label = "Pen / outline tool",
+        xValue = paletteUiState.penToolX,
+        yValue = paletteUiState.penToolY,
+        onXChange = { paletteUiState.penToolX = it },
+        onYChange = { paletteUiState.penToolY = it },
+        onXNudge = { paletteUiState.penToolX = nudgeText(paletteUiState.penToolX, it * 5) },
+        onYNudge = { paletteUiState.penToolY = nudgeText(paletteUiState.penToolY, it * 5) }
+    )
+    CoordinatePairField(
+        label = "Bucket / fill tool",
+        xValue = paletteUiState.fillToolX,
+        yValue = paletteUiState.fillToolY,
+        onXChange = { paletteUiState.fillToolX = it },
+        onYChange = { paletteUiState.fillToolY = it },
+        onXNudge = { paletteUiState.fillToolX = nudgeText(paletteUiState.fillToolX, it * 5) },
+        onYNudge = { paletteUiState.fillToolY = nudgeText(paletteUiState.fillToolY, it * 5) }
+    )
+    Text("Color swatches", color = TextSecondary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+    paletteUiState.entries.forEach { entry ->
+        CoordinatePairField(
+            label = entry.colorName,
+            xValue = entry.tapX,
+            yValue = entry.tapY,
+            onXChange = { entry.tapX = it },
+            onYChange = { entry.tapY = it },
+            onXNudge = { entry.tapX = nudgeText(entry.tapX, it * 5) },
+            onYNudge = { entry.tapY = nudgeText(entry.tapY, it * 5) }
+        )
+    }
+    FullWidthButton("Save Easy Mode Palette Profile", onSave)
+    FullWidthButton("Load Saved Easy Mode Palette Profile", onLoad)
+    FullWidthButton("Reset Easy Mode Palette Defaults", onReset, danger = true)
+}
+
+@Composable
+fun CoordinatePairField(
+    label: String,
+    xValue: String,
+    yValue: String,
+    onXChange: (String) -> Unit,
+    onYChange: (String) -> Unit,
+    onXNudge: (Int) -> Unit,
+    onYNudge: (Int) -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(label, color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            CoordinateField("X", xValue, onXChange, onXNudge, modifier = Modifier.weight(1f))
+            CoordinateField("Y", yValue, onYChange, onYNudge, modifier = Modifier.weight(1f))
         }
     }
 }
@@ -893,9 +1078,10 @@ fun CoordinateField(
     label: String,
     value: String,
     onValueChange: (String) -> Unit,
-    onNudge: (Int) -> Unit
+    onNudge: (Int) -> Unit,
+    modifier: Modifier = Modifier
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(label, color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
         Row(
             modifier = Modifier.fillMaxWidth(),
