@@ -2,6 +2,9 @@ package com.genesisofthewind.bifrost.data
 
 import android.content.Context
 import android.content.SharedPreferences
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 
 data class PaletteEntry(
     val colorName: String,
@@ -26,8 +29,18 @@ data class PaletteTapTarget(
     val label: String,
     val x: Float,
     val y: Float,
-    val required: Boolean
+    val required: Boolean,
+    val saved: Boolean
 )
+
+object PaletteProfileEvents {
+    var version by mutableStateOf(0)
+        private set
+
+    fun notifyChanged() {
+        version += 1
+    }
+}
 
 class PaletteProfileStore(context: Context) {
     private val prefs: SharedPreferences = context.getSharedPreferences("palette_profile_prefs", Context.MODE_PRIVATE)
@@ -49,26 +62,35 @@ class PaletteProfileStore(context: Context) {
         )
     }
 
-    fun saveEasyModeProfile(profile: PaletteProfile) {
+    fun saveEasyModeProfile(
+        profile: PaletteProfile,
+        markAllSaved: Boolean = true,
+        savedTargetKey: String? = null
+    ) {
         val editor = prefs.edit()
             .putString("profile_name", profile.name)
             .putFloat("pen_tool_x", profile.penToolX)
             .putFloat("pen_tool_y", profile.penToolY)
             .putFloat("fill_tool_x", profile.fillToolX)
             .putFloat("fill_tool_y", profile.fillToolY)
+            .putBoolean("${TARGET_BRUSH_TOOL}_saved", targetSaved(TARGET_BRUSH_TOOL, markAllSaved, savedTargetKey))
+            .putBoolean("${TARGET_FILL_TOOL}_saved", targetSaved(TARGET_FILL_TOOL, markAllSaved, savedTargetKey))
         profile.entries.forEachIndexed { index, entry ->
             editor
                 .putFloat("entry_${index}_x", entry.tapX)
                 .putFloat("entry_${index}_y", entry.tapY)
                 .putFloat("${entry.key}_x", entry.tapX)
                 .putFloat("${entry.key}_y", entry.tapY)
+                .putBoolean("${entry.key}_saved", targetSaved(entry.key, markAllSaved, savedTargetKey))
         }
         editor.apply()
+        PaletteProfileEvents.notifyChanged()
     }
 
     fun resetEasyModeProfile(): PaletteProfile {
         val profile = defaultEasyModeProfile()
-        saveEasyModeProfile(profile)
+        prefs.edit().clear().apply()
+        saveEasyModeProfile(profile, markAllSaved = false)
         return profile
     }
 
@@ -81,16 +103,20 @@ class PaletteProfileStore(context: Context) {
                 if (entry.key == targetKey) entry.copy(tapX = x, tapY = y) else entry
             })
         }
-        saveEasyModeProfile(updated)
+        saveEasyModeProfile(updated, markAllSaved = false, savedTargetKey = targetKey)
         return updated
+    }
+
+    private fun targetSaved(targetKey: String, markAllSaved: Boolean, savedTargetKey: String?): Boolean {
+        return markAllSaved || targetKey == savedTargetKey || prefs.getBoolean("${targetKey}_saved", false)
     }
 
     fun tapTargets(profile: PaletteProfile = loadEasyModeProfile()): List<PaletteTapTarget> {
         return buildList {
-            add(PaletteTapTarget(TARGET_BRUSH_TOOL, "Brush Tool", profile.penToolX, profile.penToolY, true))
-            add(PaletteTapTarget(TARGET_FILL_TOOL, "Fill / Bucket Tool", profile.fillToolX, profile.fillToolY, true))
+            add(PaletteTapTarget(TARGET_BRUSH_TOOL, "Brush Tool", profile.penToolX, profile.penToolY, true, prefs.getBoolean("${TARGET_BRUSH_TOOL}_saved", false)))
+            add(PaletteTapTarget(TARGET_FILL_TOOL, "Fill / Bucket Tool", profile.fillToolX, profile.fillToolY, true, prefs.getBoolean("${TARGET_FILL_TOOL}_saved", false)))
             profile.entries.forEach { entry ->
-                add(PaletteTapTarget(entry.key, entry.colorName, entry.tapX, entry.tapY, entry.colorName in REQUIRED_COLOR_NAMES))
+                add(PaletteTapTarget(entry.key, entry.colorName, entry.tapX, entry.tapY, entry.colorName in REQUIRED_COLOR_NAMES, prefs.getBoolean("${entry.key}_saved", false)))
             }
         }
     }
@@ -101,8 +127,12 @@ class PaletteProfileStore(context: Context) {
 
     fun missingRequiredTargets(profile: PaletteProfile = loadEasyModeProfile()): List<String> {
         return tapTargets(profile)
-            .filter { it.required && (it.x <= 0f || it.y <= 0f) }
+            .filter { it.required && (!it.saved || it.x <= 0f || it.y <= 0f) }
             .map { it.label }
+    }
+
+    fun requiredTargetsAreSaved(profile: PaletteProfile = loadEasyModeProfile()): Boolean {
+        return missingRequiredTargets(profile).isEmpty()
     }
 
     companion object {

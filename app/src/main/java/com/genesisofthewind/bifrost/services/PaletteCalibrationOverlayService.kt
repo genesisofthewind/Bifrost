@@ -24,6 +24,9 @@ class PaletteCalibrationOverlayService : Service() {
     private lateinit var paletteStore: PaletteProfileStore
     private var rootView: LinearLayout? = null
     private var params: WindowManager.LayoutParams? = null
+    private var controlPanelWidth = 0
+    private var crosshairSize = 0
+    private var rootPadding = 0
     private var targetKey: String = PaletteProfileStore.TARGET_FILL_TOOL
     private var targetLabel: String = "Fill / Bucket Tool"
 
@@ -48,6 +51,9 @@ class PaletteCalibrationOverlayService : Service() {
         val target = paletteStore.targetForKey(targetKey)
         val startX = target?.x?.toInt()?.takeIf { it > 0 } ?: 900
         val startY = target?.y?.toInt()?.takeIf { it > 0 } ?: 500
+        controlPanelWidth = dp(220)
+        crosshairSize = dp(72)
+        rootPadding = dp(4)
 
         val layoutParams = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -62,19 +68,19 @@ class PaletteCalibrationOverlayService : Service() {
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = startX
-            y = startY
+            x = startX - rootPadding - controlPanelWidth - (crosshairSize / 2)
+            y = startY - rootPadding - (crosshairSize / 2)
         }
         params = layoutParams
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            setPadding(dp(4), dp(4), dp(4), dp(4))
+            setPadding(rootPadding, rootPadding, rootPadding, rootPadding)
             setBackgroundColor(Color.argb(35, 0, 0, 0))
         }
 
-        root.addView(crosshairView())
         root.addView(controlPanel())
+        root.addView(crosshairView())
         rootView = root
         windowManager.addView(root, layoutParams)
     }
@@ -101,7 +107,7 @@ class PaletteCalibrationOverlayService : Service() {
                 gravity = Gravity.CENTER
                 layoutParams = FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
             })
-            layoutParams = LinearLayout.LayoutParams(dp(72), dp(72))
+            layoutParams = LinearLayout.LayoutParams(crosshairSize, crosshairSize)
             setOnTouchListener(dragListener())
         }
     }
@@ -111,7 +117,7 @@ class PaletteCalibrationOverlayService : Service() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(8), dp(4), dp(8), dp(4))
             setBackgroundColor(Color.argb(230, 17, 17, 20))
-            layoutParams = LinearLayout.LayoutParams(dp(220), LinearLayout.LayoutParams.WRAP_CONTENT)
+            layoutParams = LinearLayout.LayoutParams(controlPanelWidth, LinearLayout.LayoutParams.WRAP_CONTENT)
 
             addView(TextView(this@PaletteCalibrationOverlayService).apply {
                 text = "Tap target setup"
@@ -123,6 +129,12 @@ class PaletteCalibrationOverlayService : Service() {
                 text = "Move crosshair to $targetLabel"
                 textSize = 13f
                 setTextColor(Color.WHITE)
+                setPadding(0, 0, 0, dp(5))
+            })
+            addView(TextView(this@PaletteCalibrationOverlayService).apply {
+                text = "Controls stay left so the Tomodachi palette remains visible."
+                textSize = 10f
+                setTextColor(Color.LTGRAY)
                 setPadding(0, 0, 0, dp(5))
             })
             addView(buttonGrid(listOf(
@@ -201,17 +213,17 @@ class PaletteCalibrationOverlayService : Service() {
     private fun saveCurrentPosition() {
         val x = centerX().toFloat()
         val y = centerY().toFloat()
-        paletteStore.updateTapTarget(targetKey, x, y)
-        BifrostDebug.record("Saved $targetLabel tap target: ${x.toInt()},${y.toInt()}")
+        val profile = paletteStore.updateTapTarget(targetKey, x, y)
+        BifrostDebug.record("Captured $targetLabel: ${x.toInt()},${y.toInt()} for ${profile.name}; saved")
         stopSelf()
     }
 
     private fun centerX(): Int {
-        return (params?.x ?: 0) + dp(36)
+        return (params?.x ?: 0) + rootPadding + controlPanelWidth + (crosshairSize / 2)
     }
 
     private fun centerY(): Int {
-        return (params?.y ?: 0) + dp(36)
+        return (params?.y ?: 0) + rootPadding + (crosshairSize / 2)
     }
 
     override fun onDestroy() {

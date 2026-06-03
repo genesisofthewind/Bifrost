@@ -60,6 +60,7 @@ import androidx.compose.ui.unit.sp
 import com.genesisofthewind.bifrost.data.CalibrationStore
 import com.genesisofthewind.bifrost.data.CalibrationValues
 import com.genesisofthewind.bifrost.data.PaletteEntry
+import com.genesisofthewind.bifrost.data.PaletteProfileEvents
 import com.genesisofthewind.bifrost.data.PaletteProfile
 import com.genesisofthewind.bifrost.data.PaletteProfileStore
 import com.genesisofthewind.bifrost.data.PaletteTapTarget
@@ -519,6 +520,14 @@ fun ImageImportSection(
     val colorFillPlanner = remember { ColorFillPlanner(calibrationStore) }
     val paletteProfileStore = remember { PaletteProfileStore(context) }
     val paletteUiState = remember { PaletteProfileUiState(paletteProfileStore.loadEasyModeProfile()) }
+    val paletteProfileVersion = PaletteProfileEvents.version
+
+    LaunchedEffect(paletteProfileVersion) {
+        val profile = paletteProfileStore.loadEasyModeProfile()
+        paletteUiState.load(profile)
+        imageState.tracePlan = null
+        BifrostDebug.record("Easy Mode palette profile refreshed: ${profile.name}")
+    }
 
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) {
@@ -572,13 +581,18 @@ fun ImageImportSection(
             return null
         }
         val result = traceEngine.createTracePlan(bitmap, settings)
-        val profile = paletteUiState.currentProfile()
+        val profile = paletteProfileStore.loadEasyModeProfile()
+        paletteUiState.load(profile)
         var colorWarning: String? = null
         val finalPlan = if (imageState.imageDrawMode == ImageDrawMode.OutlineAutoColor) {
             val missingTargets = paletteProfileStore.missingRequiredTargets(profile)
             if (missingTargets.isNotEmpty()) {
                 colorWarning = "Easy Mode color warning: missing required targets ${missingTargets.joinToString()}"
                 BifrostDebug.record(colorWarning!!)
+            }
+            BifrostDebug.record("Using Easy Mode palette profile: ${profile.name}")
+            paletteProfileStore.tapTargets(profile).forEach { target ->
+                BifrostDebug.record("Palette target ${target.label}: ${target.x},${target.y} saved=${target.saved}")
             }
             val colorResult = colorFillPlanner.createOutlineAndFillPlan(
                 source = bitmap,
@@ -625,7 +639,6 @@ fun ImageImportSection(
     }
 
     fun startPaletteCalibration(target: PaletteTapTarget) {
-        paletteProfileStore.saveEasyModeProfile(paletteUiState.currentProfile())
         val intent = Intent(context, PaletteCalibrationOverlayService::class.java)
             .putExtra(PaletteCalibrationOverlayService.EXTRA_TARGET_KEY, target.key)
             .putExtra(PaletteCalibrationOverlayService.EXTRA_TARGET_LABEL, target.label)
@@ -634,22 +647,24 @@ fun ImageImportSection(
     }
 
     fun runTargetTap(target: PaletteTapTarget) {
-        if (target.x <= 0f || target.y <= 0f) {
-            BifrostDebug.record("Target test skipped: ${target.label} is not calibrated")
+        val savedTarget = paletteProfileStore.targetForKey(target.key) ?: target
+        if (!savedTarget.saved || savedTarget.x <= 0f || savedTarget.y <= 0f) {
+            BifrostDebug.record("Target test skipped: ${savedTarget.label} is not calibrated")
             return
         }
-        val stroke = StrokeSpec(target.x, target.y, target.x + 1f, target.y + 1f, 60L, 120L, "test ${target.label}")
+        val stroke = StrokeSpec(savedTarget.x, savedTarget.y, savedTarget.x + 1f, savedTarget.y + 1f, 60L, 120L, "test ${savedTarget.label}")
         val plan = StrokePlan(
             commandName = "TestPaletteTarget",
-            debugLines = listOf("test target: ${target.label}", "tap: ${target.x},${target.y}"),
+            debugLines = listOf("test target: ${savedTarget.label}", "tap: ${savedTarget.x},${savedTarget.y}", "profile: ${paletteProfileStore.loadEasyModeProfile().name}"),
             strokes = listOf(stroke)
         )
         onRunTracePlan(plan)
     }
 
     fun runTargets(targets: List<PaletteTapTarget>, commandName: String) {
-        val strokes = targets
-            .filter { it.x > 0f && it.y > 0f }
+        val savedTargets = targets.mapNotNull { paletteProfileStore.targetForKey(it.key) }
+        val strokes = savedTargets
+            .filter { it.saved && it.x > 0f && it.y > 0f }
             .map { target -> StrokeSpec(target.x, target.y, target.x + 1f, target.y + 1f, 60L, 180L, "test ${target.label}") }
         if (strokes.isEmpty()) {
             BifrostDebug.record("$commandName skipped: no calibrated targets")
@@ -658,7 +673,7 @@ fun ImageImportSection(
         onRunTracePlan(
             StrokePlan(
                 commandName = commandName,
-                debugLines = targets.map { "target ${it.label}: ${it.x},${it.y}" },
+                debugLines = savedTargets.map { "target ${it.label}: ${it.x},${it.y} saved=${it.saved}" },
                 strokes = strokes
             )
         )
@@ -846,7 +861,7 @@ fun ImageImportSection(
             onTestTarget = { runTargetTap(it) },
             onTestRequiredTargets = {
                 runTargets(
-                    paletteProfileStore.tapTargets(paletteUiState.currentProfile()).filter { it.required },
+                    paletteProfileStore.tapTargets(paletteProfileStore.loadEasyModeProfile()).filter { it.required },
                     "TestRequiredPaletteTargets"
                 )
             },
@@ -922,15 +937,17 @@ fun PaletteProfileSection(
         )
     }
     Text("Quick tests", color = TextSecondary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        listOf("Black", "Pink", "Fill / Bucket Tool").forEach { label ->
-            targets.firstOrNull { it.label == label }?.let { target ->
-                CompactTraceButton(
-                    text = "Tap $label",
-                    selected = false,
-                    modifier = Modifier.weight(1f),
-                    onClick = { onTestTarget(target) }
-                )
+    listOf("Brush Tool", "Fill / Bucket Tool", "Black", "Pink").chunked(2).forEach { rowLabels ->
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            rowLabels.forEach { label ->
+                targets.firstOrNull { it.label == label }?.let { target ->
+                    CompactTraceButton(
+                        text = "Tap $label",
+                        selected = false,
+                        modifier = Modifier.weight(1f),
+                        onClick = { onTestTarget(target) }
+                    )
+                }
             }
         }
     }
@@ -1000,8 +1017,12 @@ fun PaletteTargetRow(
                 fontWeight = FontWeight.SemiBold
             )
             Text(
-                if (target.x > 0f && target.y > 0f) "${target.x.toInt()}, ${target.y.toInt()}" else "not set",
-                color = if (target.x > 0f && target.y > 0f) TextSecondary else RedAccent,
+                when {
+                    target.saved && target.x > 0f && target.y > 0f -> "saved ${target.x.toInt()}, ${target.y.toInt()}"
+                    target.x > 0f && target.y > 0f -> "default ${target.x.toInt()}, ${target.y.toInt()}"
+                    else -> "not set"
+                },
+                color = if (target.saved && target.x > 0f && target.y > 0f) TextSecondary else RedAccent,
                 fontSize = 12.sp,
                 fontFamily = FontFamily.Monospace
             )

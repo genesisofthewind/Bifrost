@@ -73,6 +73,9 @@ class ColorFillPlanner(private val calibrationStore: CalibrationStore) {
             add("command: Outline + Auto Color Easy Mode")
             add("draw mode: ${ImageDrawMode.OutlineAutoColor.label}")
             add("palette profile: ${profile.name}")
+            add("brush tool tap: ${profile.penToolX},${profile.penToolY}")
+            add("fill tool tap: ${profile.fillToolX},${profile.fillToolY}")
+            profile.entries.forEach { entry -> add("${entry.colorName} tap: ${entry.tapX},${entry.tapY}") }
             add("source image: ${source.width}x${source.height}")
             add("planning image: ${sample.width}x${sample.height}")
             add("selector bounds: left=${bounds.left}, top=${bounds.top}, right=${bounds.right}, bottom=${bounds.bottom}")
